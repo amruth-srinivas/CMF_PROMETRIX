@@ -1,0 +1,95 @@
+/* PDF Viewer Container */
+.pdf-canvas-container {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background: #f9fafb;
+  position: relative;
+  min-height: 400px; /* Ensure minimum height */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pdf-canvas-wrapper {
+  position: relative;
+  display: inline-block;
+  min-width: 100px;
+  min-height: 100px;
+}
+
+.pdf-canvas-wrapper canvas {
+  display: block;
+  visibility: visible;
+  opacity: 1;
+}
+
+/* Annotation Layer */
+.annotation-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 10;
+  /* Width and height will be set dynamically to match canvas */
+}
+
+/* Selection box should not block events when in selection mode */
+.pdf-canvas-container.is-selecting .annotation-layer {
+  pointer-events: none;
+}
+
+.pdf-canvas-container.is-selecting .selection-box {
+  pointer-events: none;
+}
+
+.annotation-box {
+  position: absolute;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+
+/* Selection Box */
+.selection-box {
+  position: absolute;
+  border: 2px dashed #3b82f6 !important;
+  background: rgba(59, 130, 246, 0.1) !important;
+  pointer-events: none !important;
+  z-index: 15 !important;
+  box-sizing: border-box;
+  display: block !important;
+  visibility: visible !important;
+  outline: none;
+}
+
+/* Area Balloon - Red style matching image */
+.area-balloon-circle {
+  position: absolute;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid #ef4444; /* Red border */
+  color: #ef4444; /* Red number */
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  pointer-events: auto;
+  z-index: 15;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.area-balloon-line {
+  position: absolute;
+  background: #ef4444; /* Red line */
+  pointer-events: auto;
+  z-index: 14;
+}
+
+/* Hover effects */
+.annotation-box:hover {
+  opacity: 0.8;
+}
+
+.area-balloon-circle:hover {
+  transform: scale(1.1);
+  transition: transform 0.2s;
+}
