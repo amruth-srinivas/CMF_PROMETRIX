@@ -1,7 +1,7 @@
 import React from 'react';
 import { Space, Button, Typography, Divider } from 'antd';
+import { ArrowLeftOutlined, ExportOutlined, SaveOutlined, SettingOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { icon8 } from './inspectorIcons8';
 
 const { Text } = Typography;
 
@@ -40,7 +40,7 @@ const InspectorHeader = ({
           onClick={() => navigate(-1)}
           style={{ fontWeight: 600, fontSize: '12px', display: 'flex', alignItems: 'center', gap: 6 }}
         >
-          <img src={icon8.back('64748b')} width={18} height={18} alt="" />
+          <ArrowLeftOutlined style={{ fontSize: 16, color: '#64748b' }} />
           BACK
         </Button>
         <Divider orientation="vertical" style={{ height: '30px' }} />
@@ -110,14 +110,14 @@ const InspectorHeader = ({
           type="primary"
           style={{ height: '36px', display: 'flex', alignItems: 'center', gap: 8 }}
         >
-          <img src={icon8.save('ffffff')} width={18} height={18} alt="" />
+          <SaveOutlined style={{ fontSize: 16 }} />
           SAVE
         </Button>
         <Button style={{ height: '36px', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <img src={icon8.export('64748b')} width={18} height={18} alt="" />
+          <ExportOutlined style={{ fontSize: 16, color: '#64748b' }} />
           EXPORT
         </Button>
-        <Button type="text" icon={<img src={icon8.settings('64748b')} width={20} height={20} alt="" />} />
+        <Button type="text" icon={<SettingOutlined style={{ fontSize: 18, color: '#64748b' }} />} />
       </Space>
     </div>
   );

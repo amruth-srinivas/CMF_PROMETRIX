@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Table, Tag, Typography, Space, Button, Empty, Popover, Select, Divider, Input } from 'antd';
-import { icon8 } from './inspectorIcons8';
+import { FilterOutlined, SettingOutlined, UnorderedListOutlined } from '@ant-design/icons';
 
 const { Text } = Typography;
 
@@ -11,9 +11,12 @@ function dimTypeColor(type) {
   const s = (type || '').toString();
   if (!s || s === '—') return '#8c8c8c';
   const u = s.toUpperCase();
-  if (u.includes('GDT')) return '#722ed1';
+  const compact = u.replace(/[^A-Z0-9]/g, '');
+  if (compact.includes('GDT') || u.includes('GD&T')) return '#722ed1';
   if (u.includes('SURFACE') || u.includes('ROUGH')) return '#faad14';
   if (u.includes('MATERIAL') || u.includes('NOTE')) return '#8c8c8c';
+  // Diameter / ⌀ — distinct from generic DIM (blue) and GDT (purple)
+  if (u.includes('DIAMETER') || u.includes('∅') || u.includes('⌀') || /\bDIA\b/i.test(s)) return '#db6f21';
   return '#1890ff';
 }
 
@@ -390,13 +393,21 @@ const InspectorBOCTable = ({
         dataIndex: 'dimType',
         key: 'dimType',
         width: 108,
-        align: 'center',
+        align: 'left',
+        /** Colored left accent: thickness matches dim type (header stays neutral). */
+        onHeaderCell: () => ({
+          style: { borderLeft: '3px solid #bfbfbf' },
+        }),
+        onCell: (record) => ({
+          style: { borderLeft: `2.8px solid ${dimTypeColor(record.dimType)}` },
+        }),
         render: (type) => (
           <Text
             style={{
-              fontSize: '10px',
-              fontWeight: 700,
+              fontSize: '11px',
+              fontWeight: 800,
               color: dimTypeColor(type),
+              letterSpacing: '0.02em',
             }}
           >
             {type}
@@ -500,7 +511,7 @@ const InspectorBOCTable = ({
     [dataSource, onSelectedIdsChange],
   );
 
-  const tableScroll = measureMode ? { x: MEASURE_SCROLL_X } : undefined;
+  const tableScroll = measureMode ? { x: MEASURE_SCROLL_X, y: '100%' } : { y: '100%' };
 
   return (
     <div
@@ -526,7 +537,7 @@ const InspectorBOCTable = ({
         }}
       >
         <Space wrap>
-          <img src={icon8.characteristics('1890ff')} width={18} height={18} alt="" />
+          <UnorderedListOutlined style={{ fontSize: 16, color: '#1890ff' }} />
           <Text strong style={{ fontSize: '12px', textTransform: 'uppercase' }}>
             Characteristics
           </Text>
@@ -548,14 +559,6 @@ const InspectorBOCTable = ({
               />
             </Space>
           )}
-          <Button
-            size="small"
-            type="text"
-            icon={<img src={icon8.add('1890ff')} width={16} height={16} alt="" />}
-            style={{ fontSize: '9px' }}
-          >
-            ADD
-          </Button>
           {typeof onDeleteSelected === 'function' && (
             <Button
               size="small"
@@ -572,23 +575,26 @@ const InspectorBOCTable = ({
               size="small"
               type={filterActive ? 'primary' : 'text'}
               ghost={filterActive}
-              icon={<img src={icon8.filter(filterActive ? 'ffffff' : '64748b')} width={16} height={16} alt="" />}
+              icon={
+                <FilterOutlined style={{ fontSize: 14, color: filterActive ? '#fff' : '#64748b' }} />
+              }
             />
           </Popover>
           <Button
             size="small"
             type="text"
-            icon={<img src={icon8.settings('64748b')} width={16} height={16} alt="" />}
+            icon={<SettingOutlined style={{ fontSize: 14, color: '#64748b' }} />}
           />
         </Space>
       </div>
 
       <div
         ref={tableScrollRef}
+        className="qms-boc-table-wrap"
         style={{
           flex: 1,
           minHeight: 0,
-          overflow: 'auto',
+          overflow: 'hidden',
           overscrollBehavior: 'contain',
           cursor: measureMode ? 'grab' : 'default',
         }}
@@ -607,7 +613,7 @@ const InspectorBOCTable = ({
             size="small"
             bordered
             pagination={false}
-            tableLayout={measureMode ? 'fixed' : 'fixed'}
+            tableLayout="fixed"
             scroll={tableScroll}
             onRow={(record, rowIndex) => {
               const pf = measureMode ? measurePassFail(record) : null;
@@ -625,7 +631,7 @@ const InspectorBOCTable = ({
                 },
               };
             }}
-            style={{ width: '100%', minWidth: 0, fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace', fontSize: 11 }}
+            style={{ fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace', fontSize: 11 }}
           />
         )}
       </div>

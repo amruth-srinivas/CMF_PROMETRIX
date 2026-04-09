@@ -1,6 +1,25 @@
-import React from 'react';
-import { Button, Typography } from 'antd';
-import { icon8 } from './inspectorIcons8';
+import React, { useState } from 'react';
+import { Typography } from 'antd';
+
+import iconBinJpg from '../../assets/QMS icons/bin.jpg';
+import iconBinGif from '../../assets/QMS icons/bin.gif';
+import iconBrainPng from '../../assets/QMS icons/brain_icon.png';
+import iconBrainGif from '../../assets/QMS icons/brain-process.gif';
+import iconDropPng from '../../assets/QMS icons/drop.png';
+import iconNotesJpg from '../../assets/QMS icons/notes.jpg';
+import iconNotesGif from '../../assets/QMS icons/notes.gif';
+import iconResizeJpg from '../../assets/QMS icons/resize.jpg';
+import iconResizeGif from '../../assets/QMS icons/resize.gif';
+import iconRotateJpg from '../../assets/QMS icons/rotate.jpg';
+import iconRotateGif from '../../assets/QMS icons/rotate.gif';
+import iconSealJpg from '../../assets/QMS icons/seal.jpg';
+import iconSealGif from '../../assets/QMS icons/seal.gif';
+import iconSelectJpg from '../../assets/QMS icons/select.jpg';
+import iconSelectGif from '../../assets/QMS icons/select.gif';
+import iconZoomInJpg from '../../assets/QMS icons/zoom-in.jpg';
+import iconZoomInGif from '../../assets/QMS icons/zoom-in.gif';
+import iconZoomOutJpg from '../../assets/QMS icons/zoom-out.jpg';
+import iconZoomOutGif from '../../assets/QMS icons/zoom-out.gif';
 
 const { Text } = Typography;
 
@@ -15,13 +34,6 @@ const C = {
   surfaceActive: '#f5f5f5',
   rail: '#fafafa',
   divider: '#f0f0f0',
-};
-
-/** Icons8 PNG colors (hex, no #). */
-const iconHex = (active, danger, disabled) => {
-  if (disabled) return 'bfbfbf';
-  if (danger) return 'cf1322';
-  return active ? '262626' : '595959';
 };
 
 const SidebarDivider = () => (
@@ -41,15 +53,20 @@ const SidebarDivider = () => (
   </div>
 );
 
-const SidebarItem = ({
-  iconSrc,
+const SidebarItemRaster = ({
+  staticSrc,
+  animatedSrc,
   label,
   active = false,
   danger = false,
   onClick,
   disabled = false,
 }) => {
+  const [hover, setHover] = useState(false);
   const labelColor = danger ? C.danger : active ? C.labelActive : C.label;
+  const showAnimated = Boolean(animatedSrc) && hover && !disabled;
+
+  const ICON = 46;
 
   return (
     <div
@@ -57,31 +74,42 @@ const SidebarItem = ({
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: 2,
+        gap: 4,
         width: '100%',
         padding: '8px 0',
         opacity: disabled ? 0.45 : 1,
       }}
     >
-      <Button
-        type="text"
+      <button
+        type="button"
         disabled={disabled}
         onClick={onClick}
+        onMouseEnter={() => {
+          if (!disabled) setHover(true);
+        }}
+        onMouseLeave={() => setHover(false)}
+        aria-label={label}
         style={{
-          height: 42,
-          width: 42,
+          border: 'none',
+          background: 'transparent',
+          padding: 2,
+          margin: 0,
+          cursor: disabled ? 'not-allowed' : 'pointer',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: active ? C.surfaceActive : C.surface,
-          border: `1px solid ${active ? C.borderActive : C.border}`,
-          borderRadius: 10,
-          padding: 0,
-          boxShadow: active ? 'none' : '0 1px 2px rgba(0, 0, 0, 0.04)',
+          lineHeight: 0,
         }}
       >
-        <img src={iconSrc} width={22} height={22} alt="" style={{ display: 'block' }} />
-      </Button>
+        <img
+          src={showAnimated ? animatedSrc : staticSrc}
+          alt=""
+          width={ICON}
+          height={ICON}
+          draggable={false}
+          style={{ display: 'block', objectFit: 'contain', pointerEvents: 'none', userSelect: 'none' }}
+        />
+      </button>
       <Text style={{ fontSize: 11, color: labelColor, fontWeight: 500 }}>{label}</Text>
     </div>
   );
@@ -109,9 +137,6 @@ const InspectorSidebar = ({
 }) => {
   const set = (t) => () => onToolChange?.(t);
 
-  const tool = (name, active) => icon8[name](iconHex(active, false, false));
-  const viewIcon = (key) => icon8[key](iconHex(false, false, false));
-
   return (
     <div
       style={{
@@ -129,35 +154,50 @@ const InspectorSidebar = ({
     >
       <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         <SectionHeader title="TOOLS" />
-        <SidebarItem
-          iconSrc={tool('select', activeTool === 'select')}
+        <SidebarItemRaster
+          staticSrc={iconSelectJpg}
+          animatedSrc={iconSelectGif}
           label="Select"
           active={activeTool === 'select'}
           onClick={set('select')}
         />
-        <SidebarItem iconSrc={tool('pan', activeTool === 'pan')} label="Pan" active={activeTool === 'pan'} onClick={set('pan')} />
-        <SidebarItem iconSrc={tool('stamp', activeTool === 'stamp')} label="Stamp" active={activeTool === 'stamp'} onClick={set('stamp')} />
-        <SidebarItem iconSrc={tool('notes', activeTool === 'notes')} label="Notes" active={activeTool === 'notes'} onClick={set('notes')} />
+        <SidebarItemRaster staticSrc={iconDropPng} label="Pan" active={activeTool === 'pan'} onClick={set('pan')} />
+        <SidebarItemRaster
+          staticSrc={iconSealJpg}
+          animatedSrc={iconSealGif}
+          label="Stamp"
+          active={activeTool === 'stamp'}
+          onClick={set('stamp')}
+        />
+        <SidebarItemRaster
+          staticSrc={iconNotesJpg}
+          animatedSrc={iconNotesGif}
+          label="Notes"
+          active={activeTool === 'notes'}
+          onClick={set('notes')}
+        />
 
         <SidebarDivider />
 
         <SectionHeader title="VIEW" />
-        <SidebarItem iconSrc={viewIcon('zoomIn')} label="Zoom In" onClick={onZoomIn} />
-        <SidebarItem iconSrc={viewIcon('zoomOut')} label="Zoom Out" onClick={onZoomOut} />
-        <SidebarItem iconSrc={viewIcon('rotate')} label="Rotate" onClick={onRotate} />
-        <SidebarItem iconSrc={viewIcon('reset')} label="Reset" onClick={onResetView} />
+        <SidebarItemRaster staticSrc={iconZoomInJpg} animatedSrc={iconZoomInGif} label="Zoom In" onClick={onZoomIn} />
+        <SidebarItemRaster staticSrc={iconZoomOutJpg} animatedSrc={iconZoomOutGif} label="Zoom Out" onClick={onZoomOut} />
+        <SidebarItemRaster staticSrc={iconRotateJpg} animatedSrc={iconRotateGif} label="Rotate" onClick={onRotate} />
+        <SidebarItemRaster staticSrc={iconResizeJpg} animatedSrc={iconResizeGif} label="Reset" onClick={onResetView} />
 
         <SidebarDivider />
 
         <SectionHeader title="ACTIONS" />
-        <SidebarItem
-          iconSrc={icon8.autoBalloon(iconHex(false, false, autoBalloonDisabled))}
+        <SidebarItemRaster
+          staticSrc={iconBrainPng}
+          animatedSrc={iconBrainGif}
           label="Auto Balloon"
           disabled={autoBalloonDisabled}
           onClick={autoBalloonDisabled ? undefined : onAutoBalloon}
         />
-        <SidebarItem
-          iconSrc={icon8.clear(iconHex(false, true, clearAllDisabled))}
+        <SidebarItemRaster
+          staticSrc={iconBinJpg}
+          animatedSrc={iconBinGif}
           label="Clear All"
           danger
           onClick={onClearAll}

@@ -22,14 +22,12 @@ const InspectorNotesTable = ({
         id: n.id,
         index: i + 1,
         text: n.note_text || '',
-        page: n.page || 1,
       })),
     [notes],
   );
 
   const cols = [
     { title: '#', dataIndex: 'index', key: 'index', width: 46, align: 'center' },
-    { title: 'PAGE', dataIndex: 'page', key: 'page', width: 64, align: 'center' },
     {
       title: 'NOTE',
       dataIndex: 'text',
@@ -88,31 +86,31 @@ const InspectorNotesTable = ({
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: '#fff' }}>
       <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0' }}>
-        <Space.Compact style={{ width: '100%' }}>
-          <Input
-            placeholder="Add note..."
-            value={newNoteText}
-            onChange={(e) => setNewNoteText(e.target.value)}
-            onPressEnter={() => {
-              const t = (newNoteText || '').trim();
-              if (!t) return;
-              onAddNote?.(t);
-              setNewNoteText('');
-            }}
-          />
-          <Button
-            type="primary"
-            onClick={() => {
-              const t = (newNoteText || '').trim();
-              if (!t) return;
-              onAddNote?.(t);
-              setNewNoteText('');
-            }}
-          >
-            Add
-          </Button>
-        </Space.Compact>
-        <div style={{ marginTop: 6 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+          <Space.Compact style={{ flex: 1, minWidth: 160 }}>
+            <Input
+              placeholder="Add note..."
+              value={newNoteText}
+              onChange={(e) => setNewNoteText(e.target.value)}
+              onPressEnter={() => {
+                const t = (newNoteText || '').trim();
+                if (!t) return;
+                onAddNote?.(t);
+                setNewNoteText('');
+              }}
+            />
+            <Button
+              type="primary"
+              onClick={() => {
+                const t = (newNoteText || '').trim();
+                if (!t) return;
+                onAddNote?.(t);
+                setNewNoteText('');
+              }}
+            >
+              Add
+            </Button>
+          </Space.Compact>
           <Popconfirm title={`Delete all ${notes.length} notes?`} onConfirm={() => onDeleteAll?.()} disabled={!notes.length}>
             <Button size="small" danger disabled={!notes.length}>
               Delete all

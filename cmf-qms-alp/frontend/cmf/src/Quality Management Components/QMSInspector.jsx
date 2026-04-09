@@ -758,9 +758,11 @@ const QMSInspector = () => {
             flexDirection: 'column',
             overflow: 'hidden',
             padding: '12px 12px 0',
+            fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace',
           }}
         >
           <Tabs
+            className="qms-inspector-tabs"
             activeKey={activeTab}
             onChange={setActiveTab}
             items={[

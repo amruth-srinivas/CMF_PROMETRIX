@@ -13,6 +13,7 @@ import OperatorDashboard from "./Pages/OperatorDashboard";
 import PPS from "./Pages/PPS";
 import ProductionMonitoring from "./Pages/ProductionMonitoring";
 import QualityManagement from "./Quality Management Components/QualityManagement";
+import QMSInspector from "./Quality Management Components/QMSInspector";
 import InventoryMaster from "./Pages/Inventory";
 import OverviewData from "./Pages/OverviewData";
 import DocumentManagement from "./Pages/Document";
@@ -20,7 +21,7 @@ import Notification from "./Pages/Notification";
 import AccessControl from "./Pages/AccessControl";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ManufacturingCoordinator from "./Pages/ManufacturingCoordinator";
-import QMSInspector from "./Quality Management Components/QMSInspector";
+import SupervisorDashboard from "./Pages/SupervisorDashboard";
 
 function App() {
   return (
@@ -113,7 +114,8 @@ function App() {
           <Route path="/manufacturing_coordinator/configuration" element={<Configuration />} />
           
           {/* Supervisor */}
-          <Route path="/supervisor" element={<Navigate to="/login" replace />} />
+          <Route path="/supervisor" element={<Navigate to="/supervisor/production_logs" replace />} />
+          <Route path="/supervisor/production_logs" element={<SupervisorDashboard />} />
           
           {/* Inventory Supervisor */}
           <Route path="/inventory_supervisor" element={<Navigate to="/inventory_supervisor/inventory-management/inventory-master" replace />} />

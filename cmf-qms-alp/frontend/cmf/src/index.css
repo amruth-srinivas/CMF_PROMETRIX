@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -19,6 +19,45 @@ body {
 .full-height-tabs .ant-tabs-content,
 .full-height-tabs .ant-tabs-tabpane {
   height: 100%;
+}
+
+/* QMS Inspector right panel: enforce JetBrains Mono on all Ant children */
+.qms-inspector-tabs .ant-tabs-tab,
+.qms-inspector-tabs .ant-table,
+.qms-inspector-tabs .ant-typography,
+.qms-inspector-tabs .ant-tag,
+.qms-inspector-tabs .ant-input,
+.qms-inspector-tabs .ant-btn,
+.qms-inspector-tabs .ant-select,
+.qms-inspector-tabs .ant-empty-description {
+  font-family: "JetBrains Mono", "Consolas", "Courier New", monospace !important;
+}
+
+/* QMS Inspector: make Tabs fill the right panel so inner table can scroll */
+.qms-inspector-tabs {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.qms-inspector-tabs > .ant-tabs-nav {
+  flex-shrink: 0;
+  margin-bottom: 0 !important;
+}
+.qms-inspector-tabs > .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.qms-inspector-tabs > .ant-tabs-content-holder > .ant-tabs-content {
+  height: 100%;
+}
+.qms-inspector-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane {
+  height: 100%;
+}
+.qms-inspector-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane-active {
+  display: flex;
+  flex-direction: column;
 }
 
 /* Inventory & common table header styling - apply ONLY to header row */
@@ -57,3 +96,27 @@ body {
 
 /* Previously had per-table header padding overrides; now all headers use same padding
    via .ant-table-thead .table-header-styled to keep height consistent. */
+
+/* QMS BOC table: let Ant Table fill the flex container so scroll.y works */
+.qms-boc-table-wrap {
+  display: flex;
+  flex-direction: column;
+}
+.qms-boc-table-wrap .ant-spin-nested-loading,
+.qms-boc-table-wrap .ant-spin-container,
+.qms-boc-table-wrap .ant-table-wrapper,
+.qms-boc-table-wrap .ant-table,
+.qms-boc-table-wrap .ant-table-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.qms-boc-table-wrap .ant-table-header {
+  flex-shrink: 0;
+}
+.qms-boc-table-wrap .ant-table-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto !important;
+}
