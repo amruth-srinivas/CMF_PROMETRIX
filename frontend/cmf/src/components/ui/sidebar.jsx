@@ -16,7 +16,8 @@ import {
   LockOutlined,
   MenuOutlined,
   CloseOutlined,
-  ExperimentOutlined
+  ExperimentOutlined,
+  BuildOutlined
 } from "@ant-design/icons";
 import cmtisLogo from "../../assets/cmtis.png";
 
@@ -274,6 +275,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         key: `${prefix}/production_logs`,
         label: <Link to={`${prefix}/production_logs`} onClick={() => setMobileDrawerOpen(false)}>Production logs</Link>,
         icon: <FileTextOutlined />,
+      },
+      {
+        key: `${prefix}/create-inspection-plan`,
+        label: <Link to={`${prefix}/create-inspection-plan`} onClick={() => setMobileDrawerOpen(false)}>Create Inspection Plan</Link>,
+        icon: <BuildOutlined />,
       },
     ];
   } else if (prefix === '/inventory_supervisor') {

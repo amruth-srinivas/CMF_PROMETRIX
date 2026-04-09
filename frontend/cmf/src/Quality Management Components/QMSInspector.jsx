@@ -89,19 +89,59 @@ const QMSInspector = () => {
   const [viewerWidth, setViewerWidth] = useState(880);
   const [viewerHeight, setViewerHeight] = useState(600);
 
-  const ipid = 'AUTO';
-  const [salesOrderId, setSalesOrderId] = useState(orderId && !Number.isNaN(Number(orderId)) ? Number(orderId) : undefined);
-  const [opNo] = useState(() => {
-    if (opNumber == null || opNumber === '') return 10;
-    const n = Number(opNumber);
-    return Number.isNaN(n) ? 10 : n;
-  });
   const [saving, setSaving] = useState(false);
   const [inspectorMode, setInspectorMode] = useState('PLAN');
   const [stageRows, setStageRows] = useState([]);
   const [activeTab, setActiveTab] = useState('characteristics');
   const [notes, setNotes] = useState([]);
   const [notesLoading, setNotesLoading] = useState(false);
+  const [planConfirmed, setPlanConfirmed] = useState(false);
+
+  const ipid = useMemo(() => {
+    if (!orderId || !partNumber || !opNumber) return 'AUTO';
+    return `PLAN_${orderId}_${partNumber}_OP${opNumber}`;
+  }, [orderId, partNumber, opNumber]);
+
+  const [salesOrderId, setSalesOrderId] = useState(orderId && !Number.isNaN(Number(orderId)) ? Number(orderId) : undefined);
+  const [opNo] = useState(() => {
+    if (opNumber == null || opNumber === '') return 10;
+    const n = Number(opNumber);
+    return Number.isNaN(n) ? 10 : n;
+  });
+
+  useEffect(() => {
+    if (salesOrderId && ipid) {
+      axios.get(`${QUALITY_API_BASE_URL}/quality/ftp-status`, {
+        params: { order_id: salesOrderId, ipid }
+      }).then(res => {
+        setPlanConfirmed(res.data.is_completed);
+      }).catch(err => console.error("Failed to fetch plan status:", err));
+    }
+  }, [salesOrderId, ipid]);
+
+  const handleConfirmPlan = () => {
+    if (planConfirmed) return;
+    Modal.confirm({
+      title: 'Confirm Inspection Plan?',
+      content: 'Once confirmed, you will no longer be able to edit the characteristics or clear the plan. This finalized plan will be used for inspections.',
+      okText: 'Confirm',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          setSaving(true);
+          await axios.post(`${QUALITY_API_BASE_URL}/quality/ftp-status`, null, {
+            params: { order_id: salesOrderId, ipid, status_val: 'Completed' }
+          });
+          setPlanConfirmed(true);
+          message.success('Inspection plan confirmed and finalized.');
+        } catch (err) {
+          message.error('Failed to confirm plan.');
+        } finally {
+          setSaving(false);
+        }
+      }
+    });
+  };
 
   useLayoutEffect(() => {
     const el = viewerWrapRef.current;
@@ -682,6 +722,8 @@ const QMSInspector = () => {
         operationName={operationName}
         mode={inspectorMode}
         onModeChange={setInspectorMode}
+        planConfirmed={planConfirmed}
+        onConfirm={handleConfirmPlan}
       />
 
       {/* Plain divs — Ant Sider's internal wrapper breaks flex height chains */}
@@ -695,7 +737,8 @@ const QMSInspector = () => {
           onResetView={handleResetView}
           onAutoBalloon={handleAutoBalloon}
           onClearAll={handleClearAll}
-          clearAllDisabled={!bocRowsRaw.length}
+          clearAllDisabled={!bocRowsRaw.length || planConfirmed}
+          disabled={planConfirmed}
         />
 
         {/* PDF viewer */}
@@ -741,6 +784,7 @@ const QMSInspector = () => {
                 balloonOverlays={balloonOverlays}
                 noteOverlays={noteOverlays}
                 selectedBalloonId={lastClickedRowId}
+                disabled={planConfirmed}
               />
             </div>
           )}

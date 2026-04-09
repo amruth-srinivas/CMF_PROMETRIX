@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Layout, Button, Modal, Table, Spin, Drawer } from 'antd';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { MenuOutlined, AppstoreOutlined, ShoppingCartOutlined, ClusterOutlined, ToolOutlined, InfoCircleOutlined, EyeOutlined, BuildOutlined, CheckCircleOutlined, CloudDownloadOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, MenuOutlined, AppstoreOutlined, ShoppingCartOutlined, ClusterOutlined, ToolOutlined, InfoCircleOutlined, EyeOutlined, BuildOutlined, CheckCircleOutlined, CloudDownloadOutlined } from "@ant-design/icons";
 import QualityManagementBOM from './QualityManagementBOM';
 import { Card, Tag, Typography, Empty, Space } from 'antd';
 import axios from 'axios';
@@ -13,11 +13,17 @@ const { Text, Title } = Typography;
 const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const productIdFromQuery = searchParams.get('productId');
   const orderIdFromQuery = searchParams.get('orderId');
   const effectiveOrderId =
     initialOrderId && String(initialOrderId) !== 'null' && String(initialOrderId) !== ''
       ? initialOrderId
       : orderIdFromQuery || undefined;
+  
+  const effectiveProductId =
+    initialProductId && String(initialProductId) !== 'null' && String(initialProductId) !== ''
+      ? initialProductId
+      : productIdFromQuery || undefined;
   const [selectedItem, setSelectedItem] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
@@ -72,8 +78,28 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
         axios.get(`${QUALITY_API_BASE_URL}/operations/part/${partId}`),
         axios.get(`${QUALITY_API_BASE_URL}/documents/part/${partId}`)
       ]);
-      const ops = opsRes.data || [];
+      let ops = opsRes.data || [];
       const docs = docsRes.data || [];
+      
+      // Enrich operations with FTP status from the new bulk endpoint
+      if (effectiveOrderId && ops.length > 0) {
+        try {
+          const statusRes = await axios.get(`${QUALITY_API_BASE_URL}/quality/ftp-status/order/${effectiveOrderId}`);
+          const statuses = statusRes.data || {};
+          ops = ops.map(op => {
+            const opNumber = op.operation_number;
+            const partNumber = selectedItem.part_number;
+            const ipid = `PLAN_${effectiveOrderId}_${partNumber}_OP${opNumber}`;
+            return {
+              ...op,
+              ftp_status: statuses[ipid]?.status || 'Pending'
+            };
+          });
+        } catch (statusErr) {
+          console.warn("Failed to fetch FTP statuses:", statusErr);
+        }
+      }
+
       setOperations(ops);
       setPartDocuments(docs);
       
@@ -234,8 +260,17 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
   }
 
   return (
-    <div style={{ height: 'calc(100vh - 180px)', overflow: 'hidden' }}>
-      <Layout style={{ height: "100%", background: "transparent" }}>
+    <div style={{ height: 'calc(100vh - 160px)', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ marginBottom: '12px', flexShrink: 0 }}>
+        <Button 
+          icon={<ArrowLeftOutlined />} 
+          onClick={() => navigate('/supervisor/create-inspection-plan')}
+          style={{ borderRadius: '6px', fontWeight: 500 }}
+        >
+          Back to Projects
+        </Button>
+      </div>
+      <Layout style={{ flex: 1, background: "transparent", overflow: 'hidden', borderRadius: '8px', border: '1px solid #f0f0f0' }}>
         {/* Mobile Toggle */}
         {isMobile && (
           <Button
@@ -263,7 +298,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
             <QualityManagementBOM
               onItemSelected={handleItemSelected}
               onHierarchyLoaded={handleHierarchyLoaded}
-              initialProductId={initialProductId}
+              initialProductId={effectiveProductId}
             />
           </Sider>
         )}
@@ -280,7 +315,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
             <QualityManagementBOM
               onItemSelected={handleItemSelected}
               onHierarchyLoaded={handleHierarchyLoaded}
-              initialProductId={initialProductId}
+              initialProductId={effectiveProductId}
             />
           </Drawer>
         )}
@@ -411,7 +446,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                               size="small" 
                               type="primary" 
                               ghost 
-                              icon={<BuildOutlined />}
+                              icon={record.ftp_status === 'Completed' ? <EyeOutlined /> : <BuildOutlined />}
                               onClick={() => {
                                 const { url, isPdf, name, apiDocumentId } = getDrawingInfo(record);
                                 const hierarchy = productHierarchies[selectedItem.productId];
@@ -437,10 +472,13 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                                 if (effectiveOrderId && String(effectiveOrderId) !== 'null') {
                                   qs.set('orderId', String(effectiveOrderId));
                                 }
-                                navigate(`/admin/qms-inspector?${qs.toString()}`);
+                                const currentPath = window.location.pathname;
+                                const isSupervisor = currentPath.includes('/supervisor/');
+                                const inspectorRoot = isSupervisor ? '/supervisor' : '/admin';
+                                navigate(`${inspectorRoot}/qms-inspector?${qs.toString()}`);
                               }}
                             >
-                              Create Plan
+                              {record.ftp_status === 'Completed' ? 'View Plan' : 'Create Plan'}
                             </Button>
                             <Button 
                               size="small" 

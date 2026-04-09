@@ -134,6 +134,7 @@ const InspectorSidebar = ({
   onAutoBalloon,
   clearAllDisabled = false,
   autoBalloonDisabled = false,
+  disabled = false,
 }) => {
   const set = (t) => () => onToolChange?.(t);
 
@@ -160,6 +161,7 @@ const InspectorSidebar = ({
           label="Select"
           active={activeTool === 'select'}
           onClick={set('select')}
+          disabled={disabled}
         />
         <SidebarItemRaster staticSrc={iconDropPng} label="Pan" active={activeTool === 'pan'} onClick={set('pan')} />
         <SidebarItemRaster
@@ -168,6 +170,7 @@ const InspectorSidebar = ({
           label="Stamp"
           active={activeTool === 'stamp'}
           onClick={set('stamp')}
+          disabled={disabled}
         />
         <SidebarItemRaster
           staticSrc={iconNotesJpg}
@@ -192,8 +195,8 @@ const InspectorSidebar = ({
           staticSrc={iconBrainPng}
           animatedSrc={iconBrainGif}
           label="Auto Balloon"
-          disabled={autoBalloonDisabled}
-          onClick={autoBalloonDisabled ? undefined : onAutoBalloon}
+          disabled={autoBalloonDisabled || disabled}
+          onClick={(autoBalloonDisabled || disabled) ? undefined : onAutoBalloon}
         />
         <SidebarItemRaster
           staticSrc={iconBinJpg}

@@ -1,6 +1,6 @@
 import React from 'react';
-import { Space, Button, Typography, Divider } from 'antd';
-import { ArrowLeftOutlined, ExportOutlined, SaveOutlined, SettingOutlined } from '@ant-design/icons';
+import { Space, Button, Typography, Divider, Tag } from 'antd';
+import { ArrowLeftOutlined, ExportOutlined, SaveOutlined, SettingOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 
 const { Text } = Typography;
@@ -17,6 +17,8 @@ const InspectorHeader = ({
   fileName = 'Drawing.pdf',
   mode = 'PLAN',
   onModeChange,
+  planConfirmed = false,
+  onConfirm,
 }) => {
   const navigate = useNavigate();
 
@@ -36,12 +38,17 @@ const InspectorHeader = ({
     >
       <Space size="large" align="center">
         <Button
-          type="text"
           onClick={() => navigate(-1)}
-          style={{ fontWeight: 600, fontSize: '12px', display: 'flex', alignItems: 'center', gap: 6 }}
+          style={{ 
+            borderRadius: '6px', 
+            fontWeight: 500,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+          icon={<ArrowLeftOutlined />}
         >
-          <ArrowLeftOutlined style={{ fontSize: 16, color: '#64748b' }} />
-          BACK
+          Back
         </Button>
         <Divider orientation="vertical" style={{ height: '30px' }} />
 
@@ -84,6 +91,9 @@ const InspectorHeader = ({
         <Text type="secondary" style={{ fontSize: '13px', fontStyle: 'italic' }}>
           {fileName}
         </Text>
+        {planConfirmed && (
+          <Tag color="success" style={{ marginLeft: 16 }}>PLAN FINALIZED</Tag>
+        )}
       </Space>
 
       <Space size="middle">
@@ -109,9 +119,11 @@ const InspectorHeader = ({
         <Button
           type="primary"
           style={{ height: '36px', display: 'flex', alignItems: 'center', gap: 8 }}
+          onClick={onConfirm}
+          disabled={planConfirmed}
+          icon={planConfirmed ? <CheckCircleOutlined /> : <SaveOutlined />}
         >
-          <SaveOutlined style={{ fontSize: 16 }} />
-          SAVE
+          {planConfirmed ? 'CONFIRMED' : 'CONFIRM'}
         </Button>
         <Button style={{ height: '36px', display: 'flex', alignItems: 'center', gap: 8 }}>
           <ExportOutlined style={{ fontSize: 16, color: '#64748b' }} />

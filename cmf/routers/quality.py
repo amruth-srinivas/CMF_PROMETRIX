@@ -330,3 +330,48 @@ def delete_notes_for_part(part_id: int, db: Session = Depends(get_db)):
     db.query(Note).filter(Note.part_id == part_id).delete()
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+@router.get("/ftp-status")
+def get_ftp_status(
+    order_id: int = Query(...),
+    ipid: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    from DB.models.quality import FTP
+    status_row = db.query(FTP).filter(FTP.order_id == order_id, FTP.ipid == ipid).first()
+    if status_row:
+        return {"status": status_row.status, "is_completed": status_row.is_completed}
+    return {"status": "Pending", "is_completed": False}
+
+
+@router.get("/ftp-status/order/{order_id}")
+def get_all_ftp_status_for_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+):
+    from DB.models.quality import FTP
+    rows = db.query(FTP).filter(FTP.order_id == order_id).all()
+    return {row.ipid: {"status": row.status, "is_completed": row.is_completed} for row in rows}
+
+
+@router.post("/ftp-status")
+def set_ftp_status(
+    order_id: int = Query(...),
+    ipid: str = Query(...),
+    status_val: str = Query("Completed"),
+    db: Session = Depends(get_db),
+):
+    from DB.models.quality import FTP
+    status_row = db.query(FTP).filter(FTP.order_id == order_id, FTP.ipid == ipid).first()
+    if status_row:
+        status_row.status = status_val
+        status_row.is_completed = (status_val == "Completed")
+    else:
+        status_row = FTP(
+            order_id=order_id,
+            ipid=ipid,
+            status=status_val,
+            is_completed=(status_val == "Completed"),
+        )
+        db.add(status_row)
+    db.commit()
+    return {"status": status_row.status, "is_completed": status_row.is_completed}

@@ -30,6 +30,7 @@ const PdfInspectionPlanCanvas = ({
   balloonOverlays = [],
   noteOverlays = [],
   selectedBalloonId = null,
+  disabled = false,
 }) => {
   const { message } = App.useApp();
   const canvasWrapRef = useRef(null);
@@ -332,6 +333,7 @@ const PdfInspectionPlanCanvas = ({
   );
 
   const onCanvasMouseDown = (e) => {
+    if (disabled) return;
     if (isPan) return;
     if (!canDragSelect) return;
     e.stopPropagation();
@@ -641,7 +643,7 @@ const PdfInspectionPlanCanvas = ({
         {activeTool === 'notes' && 'Notes: drag a region to extract and save notes. Wheel zooms.'}
         {activeTool === 'select' && 'Select: drag to detect dimensions (requires part document). Wheel zooms.'}
         {activeTool === 'stamp' && 'Stamp: drag a region, then complete the form. Wheel zooms.'}
-        {!canDragSelect && !isPan && 'Click Select or Stamp in the sidebar to draw on the PDF.'}
+        {!canDragSelect && !isPan && (disabled ? 'Inspection plan is finalized and read-only.' : 'Click Select or Stamp in the sidebar to draw on the PDF.')}
       </Text>
     </div>
   );

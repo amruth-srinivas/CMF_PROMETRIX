@@ -22,6 +22,7 @@ import AccessControl from "./Pages/AccessControl";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ManufacturingCoordinator from "./Pages/ManufacturingCoordinator";
 import SupervisorDashboard from "./Pages/SupervisorDashboard";
+import CreateInspectionPlan from "./Supervisor Components/CreateInspectionPlan";
 
 function App() {
   return (
@@ -116,6 +117,9 @@ function App() {
           {/* Supervisor */}
           <Route path="/supervisor" element={<Navigate to="/supervisor/production_logs" replace />} />
           <Route path="/supervisor/production_logs" element={<SupervisorDashboard />} />
+          <Route path="/supervisor/create-inspection-plan" element={<CreateInspectionPlan />} />
+          <Route path="/supervisor/quality-management" element={<QualityManagement />} />
+          <Route path="/supervisor/qms-inspector" element={<QMSInspector />} />
           
           {/* Inventory Supervisor */}
           <Route path="/inventory_supervisor" element={<Navigate to="/inventory_supervisor/inventory-management/inventory-master" replace />} />

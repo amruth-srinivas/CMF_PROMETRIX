@@ -103,6 +103,7 @@ const InspectorBOCTable = ({
   quantityOptions = [{ value: 1, label: 'Quantity 1' }],
   quantityNo = 1,
   onQuantityChange,
+  disabled = false,
 }) => {
   const rangeAnchorIndexRef = useRef(null);
   const tableScrollRef = useRef(null);
@@ -494,7 +495,7 @@ const InspectorBOCTable = ({
 
   const handleRowClick = useCallback(
     (record, index, e) => {
-      if (suppressRowClickRef.current) return;
+      if (disabled || suppressRowClickRef.current) return;
       if (e.target?.closest?.('input, textarea, button, .ant-select, .ant-input')) {
         return;
       }
@@ -563,7 +564,7 @@ const InspectorBOCTable = ({
             <Button
               size="small"
               danger
-              disabled={!selectedIds.length}
+              disabled={!selectedIds.length || disabled}
               onClick={onDeleteSelected}
               style={{ fontSize: '9px' }}
             >
