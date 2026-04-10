@@ -1,6 +1,6 @@
 import React from 'react';
-import { Space, Button, Typography, Divider } from 'antd';
-import { ArrowLeftOutlined, ExportOutlined, SaveOutlined, SettingOutlined } from '@ant-design/icons';
+import { Space, Button, Typography, Divider, Tag } from 'antd';
+import { ArrowLeftOutlined, ExportOutlined, SaveOutlined, SettingOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 
 const { Text } = Typography;
@@ -17,6 +17,9 @@ const InspectorHeader = ({
   fileName = 'Drawing.pdf',
   mode = 'PLAN',
   onModeChange,
+  planStatus = null,
+  onConfirmPlan,
+  confirmPlanDisabled = false,
 }) => {
   const navigate = useNavigate();
 
@@ -106,8 +109,24 @@ const InspectorHeader = ({
           </Button>
         </div>
 
+        {planStatus === 'confirmed' && (
+          <Tag color="success" style={{ margin: 0 }}>
+            Plan confirmed
+          </Tag>
+        )}
+        {planStatus !== 'confirmed' && typeof onConfirmPlan === 'function' && (
+          <Button
+            type="primary"
+            icon={<CheckCircleOutlined />}
+            style={{ height: '36px' }}
+            onClick={onConfirmPlan}
+            disabled={confirmPlanDisabled}
+          >
+            Confirm plan
+          </Button>
+        )}
         <Button
-          type="primary"
+          type="default"
           style={{ height: '36px', display: 'flex', alignItems: 'center', gap: 8 }}
         >
           <SaveOutlined style={{ fontSize: 16 }} />

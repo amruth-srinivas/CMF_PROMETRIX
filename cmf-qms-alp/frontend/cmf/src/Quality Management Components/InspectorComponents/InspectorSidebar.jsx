@@ -134,8 +134,13 @@ const InspectorSidebar = ({
   onAutoBalloon,
   clearAllDisabled = false,
   autoBalloonDisabled = false,
+  /** When plan is confirmed, block editing tools that change characteristics */
+  planEditLocked = false,
 }) => {
-  const set = (t) => () => onToolChange?.(t);
+  const set = (t) => () => {
+    if (planEditLocked && (t === 'select' || t === 'stamp')) return;
+    onToolChange?.(t);
+  };
 
   return (
     <div
@@ -159,6 +164,7 @@ const InspectorSidebar = ({
           animatedSrc={iconSelectGif}
           label="Select"
           active={activeTool === 'select'}
+          disabled={planEditLocked}
           onClick={set('select')}
         />
         <SidebarItemRaster staticSrc={iconDropPng} label="Pan" active={activeTool === 'pan'} onClick={set('pan')} />
@@ -167,6 +173,7 @@ const InspectorSidebar = ({
           animatedSrc={iconSealGif}
           label="Stamp"
           active={activeTool === 'stamp'}
+          disabled={planEditLocked}
           onClick={set('stamp')}
         />
         <SidebarItemRaster
@@ -192,8 +199,8 @@ const InspectorSidebar = ({
           staticSrc={iconBrainPng}
           animatedSrc={iconBrainGif}
           label="Auto Balloon"
-          disabled={autoBalloonDisabled}
-          onClick={autoBalloonDisabled ? undefined : onAutoBalloon}
+          disabled={autoBalloonDisabled || planEditLocked}
+          onClick={autoBalloonDisabled || planEditLocked ? undefined : onAutoBalloon}
         />
         <SidebarItemRaster
           staticSrc={iconBinJpg}
@@ -201,7 +208,7 @@ const InspectorSidebar = ({
           label="Clear All"
           danger
           onClick={onClearAll}
-          disabled={clearAllDisabled}
+          disabled={clearAllDisabled || planEditLocked}
         />
       </div>
     </div>

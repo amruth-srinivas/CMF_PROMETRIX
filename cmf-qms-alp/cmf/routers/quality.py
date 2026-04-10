@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from DB.database import get_db
-from DB.models.quality import MasterBoc, StageInspection, Note
+from DB.models.quality import MasterBoc, StageInspection, Note, InspectionPlanStatus
 from DB.models.oms import Part, Order
 from DB.models.access_control import AccessUser
 from DB.schemas.quality_api import (
@@ -22,9 +22,13 @@ from DB.schemas.quality_api import (
     NoteCreate,
     NoteUpdate,
     NoteResponse,
+    InspectionPlanStatusUpsert,
+    InspectionPlanStatusResponse,
 )
 
 router = APIRouter(prefix="/quality", tags=["quality"])
+
+_ALLOWED_INSPECTION_PLAN_STATUS = frozenset({"draft", "confirmed"})
 
 
 def _master_boc_id_from_stage_bbox(bbox: Optional[str]) -> Optional[int]:
@@ -49,6 +53,64 @@ def _resolve_stage_inspection_user_id(db: Session, requested: Optional[int]) -> 
         return requested
     u = db.query(AccessUser).order_by(AccessUser.id.asc()).first()
     return u.id if u is not None else 1
+
+
+@router.get("/inspection-plan-status", response_model=List[InspectionPlanStatusResponse])
+def list_inspection_plan_status(
+    part_number: str = Query(..., description="oms.parts.part_number"),
+    sales_order_id: int = Query(...),
+    op_no: Optional[int] = Query(None, description="Filter by operation number; omit for all ops on this part/order"),
+    db: Session = Depends(get_db),
+):
+    q = db.query(InspectionPlanStatus).filter(
+        InspectionPlanStatus.part_number == part_number.strip(),
+        InspectionPlanStatus.sales_order_id == sales_order_id,
+    )
+    if op_no is not None:
+        q = q.filter(InspectionPlanStatus.op_no == op_no)
+    return q.order_by(InspectionPlanStatus.op_no.asc()).all()
+
+
+@router.put("/inspection-plan-status", response_model=InspectionPlanStatusResponse)
+def upsert_inspection_plan_status(body: InspectionPlanStatusUpsert, db: Session = Depends(get_db)):
+    pn = (body.part_number or "").strip()
+    if not pn:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="part_number is required")
+    st = (body.status or "draft").strip().lower()
+    if st not in _ALLOWED_INSPECTION_PLAN_STATUS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"status must be one of: {', '.join(sorted(_ALLOWED_INSPECTION_PLAN_STATUS))}",
+        )
+    part = db.query(Part).filter(Part.part_number == pn).first()
+    if not part:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Part number not found: {pn}")
+    order = db.query(Order).filter(Order.id == body.sales_order_id).first()
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order not found: {body.sales_order_id}")
+
+    row = (
+        db.query(InspectionPlanStatus)
+        .filter(
+            InspectionPlanStatus.part_number == pn,
+            InspectionPlanStatus.sales_order_id == body.sales_order_id,
+            InspectionPlanStatus.op_no == body.op_no,
+        )
+        .first()
+    )
+    if row:
+        row.status = st
+    else:
+        row = InspectionPlanStatus(
+            part_number=pn,
+            sales_order_id=body.sales_order_id,
+            op_no=body.op_no,
+            status=st,
+        )
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 @router.get("/master-boc", response_model=List[MasterBocResponse])

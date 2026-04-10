@@ -76,6 +76,25 @@ class StageInspectionUpdate(BaseModel):
     is_done: Optional[bool] = None
 
 
+class InspectionPlanStatusUpsert(BaseModel):
+    part_number: str = Field(..., description="oms.parts.part_number")
+    sales_order_id: int
+    op_no: int
+    status: str = Field(default="draft", description="draft | confirmed")
+
+
+class InspectionPlanStatusResponse(BaseModel):
+    id: int
+    part_number: str
+    sales_order_id: int
+    op_no: int
+    status: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class NoteBase(BaseModel):
     part_id: int
     document_id: Optional[int] = None

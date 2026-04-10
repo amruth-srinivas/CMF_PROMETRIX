@@ -103,6 +103,8 @@ const InspectorBOCTable = ({
   quantityOptions = [{ value: 1, label: 'Quantity 1' }],
   quantityNo = 1,
   onQuantityChange,
+  /** Hide plan editing actions (e.g. after plan is confirmed) */
+  planEditLocked = false,
 }) => {
   const rangeAnchorIndexRef = useRef(null);
   const tableScrollRef = useRef(null);
@@ -559,7 +561,7 @@ const InspectorBOCTable = ({
               />
             </Space>
           )}
-          {typeof onDeleteSelected === 'function' && (
+          {typeof onDeleteSelected === 'function' && !planEditLocked && (
             <Button
               size="small"
               danger

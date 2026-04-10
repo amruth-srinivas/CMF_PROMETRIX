@@ -20,6 +20,7 @@ const PdfInspectionPlanCanvas = ({
   onDetectionComplete,
   onStampRegion,
   onNoteRegion,
+  onExportBalloonedReady,
   loadingExternal = false,
   zoom = 1,
   onZoomChange,
@@ -108,6 +109,65 @@ const PdfInspectionPlanCanvas = ({
     }
     return { width: el.offsetWidth, height: el.offsetHeight };
   }, []);
+
+  /**
+   * Export current page as PNG including balloon overlays.
+   * Returned blob can be uploaded to operation-documents/upload as BALOON.
+   */
+  const exportBalloonedPng = useCallback(async () => {
+    const wrap = canvasWrapRef.current;
+    if (!wrap) return null;
+    const srcCanvas = wrap.querySelector('canvas');
+    if (!srcCanvas) return null;
+
+    const out = document.createElement('canvas');
+    out.width = srcCanvas.width;
+    out.height = srcCanvas.height;
+    const ctx = out.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(srcCanvas, 0, 0);
+
+    const displayW = parseFloat(srcCanvas.style.width) || srcCanvas.width / (window.devicePixelRatio || 1);
+    const scale = displayW > 0 ? srcCanvas.width / displayW : 1;
+
+    for (const br of balloonScreenRects) {
+      const x = Math.round(br.left * scale);
+      const y = Math.round(br.top * scale);
+      const w = Math.max(4, Math.round(br.width * scale));
+      const h = Math.max(4, Math.round(br.height * scale));
+      ctx.strokeStyle = '#22c55e';
+      ctx.lineWidth = Math.max(2, Math.round(2 * scale));
+      ctx.fillStyle = 'rgba(34, 197, 94, 0.1)';
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeRect(x, y, w, h);
+
+      const label = String(br.label || '');
+      if (label) {
+        const tagH = Math.max(16, Math.round(18 * scale));
+        const fontPx = Math.max(10, Math.round(11 * scale));
+        ctx.font = `700 ${fontPx}px Arial, sans-serif`;
+        const textW = Math.ceil(ctx.measureText(label).width);
+        const tagW = Math.max(Math.round(20 * scale), textW + Math.round(10 * scale));
+        const tagX = Math.max(0, x - Math.round(2 * scale));
+        const tagY = Math.max(0, y - tagH);
+        ctx.fillStyle = '#22c55e';
+        ctx.fillRect(tagX, tagY, tagW, tagH);
+        ctx.fillStyle = '#ffffff';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, tagX + Math.round((tagW - textW) / 2), tagY + Math.round(tagH / 2));
+      }
+    }
+
+    return await new Promise((resolve) => {
+      out.toBlob((b) => resolve(b || null), 'image/png');
+    });
+  }, [balloonScreenRects]);
+
+  useEffect(() => {
+    if (typeof onExportBalloonedReady !== 'function') return;
+    onExportBalloonedReady(exportBalloonedPng);
+    return () => onExportBalloonedReady(null);
+  }, [onExportBalloonedReady, exportBalloonedPng]);
 
   useLayoutEffect(() => {
     let cancelled = false;

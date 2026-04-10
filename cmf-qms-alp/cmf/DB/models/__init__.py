@@ -35,6 +35,7 @@ from .quality import (
     MasterBoc,
     StageInspection,
     FTP,
+    InspectionPlanStatus,
     Note,
 )
 from .scheduling import (
@@ -75,6 +76,7 @@ __all__ = [
     "MasterBoc",
     "StageInspection",
     "FTP",
+    "InspectionPlanStatus",
     "Note",
     "Base"
 ]

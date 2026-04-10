@@ -85,6 +85,25 @@ class FTP(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class InspectionPlanStatus(Base):
+    """
+    Draft vs confirmed inspection plan per part number + sales order + operation.
+    """
+    __tablename__ = "inspection_plan_status"
+    __table_args__ = (
+        UniqueConstraint("part_number", "sales_order_id", "op_no", name="uix_inspection_plan_scope"),
+        {"schema": "quality"},
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    part_number = Column(String, nullable=False)
+    sales_order_id = Column(Integer, nullable=False)
+    op_no = Column(Integer, nullable=False)
+    status = Column(String(32), nullable=False, server_default=text("'draft'"))
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class Note(Base):
     """
     Inspector notes on PDF regions.

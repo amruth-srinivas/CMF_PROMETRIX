@@ -55,6 +55,7 @@ const QMSInspector = () => {
   const partNumber = searchParams.get('partNumber');
   const orderId = searchParams.get('orderId');
   const opNumber = searchParams.get('operationNumber');
+  const operationId = searchParams.get('operationId');
   const fileName = searchParams.get('fileName') || 'Drawing.pdf';
   const projectName = searchParams.get('projectName') || '';
   const partName = searchParams.get('partName') || '';
@@ -85,6 +86,7 @@ const QMSInspector = () => {
   const [stampSaving, setStampSaving] = useState(false);
 
   const viewerWrapRef = useRef(null);
+  const exportBalloonedRef = useRef(null);
   const quantityClearSkipRef = useRef(true);
   const [viewerWidth, setViewerWidth] = useState(880);
   const [viewerHeight, setViewerHeight] = useState(600);
@@ -97,6 +99,8 @@ const QMSInspector = () => {
     return Number.isNaN(n) ? 10 : n;
   });
   const [saving, setSaving] = useState(false);
+  /** null = unknown / no row; draft | confirmed from quality.inspection_plan_status */
+  const [planStatus, setPlanStatus] = useState(null);
   const [inspectorMode, setInspectorMode] = useState('PLAN');
   const [stageRows, setStageRows] = useState([]);
   const [activeTab, setActiveTab] = useState('characteristics');
@@ -178,6 +182,31 @@ const QMSInspector = () => {
   useEffect(() => {
     void fetchMasterBoc();
   }, [fetchMasterBoc]);
+
+  useEffect(() => {
+    const oid = Number(salesOrderId);
+    if (!partNumber || !oid) {
+      setPlanStatus(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await axios.get(`${QUALITY_API_BASE_URL}/quality/inspection-plan-status`, {
+          params: { part_number: partNumber, sales_order_id: oid, op_no: opNo },
+        });
+        const row = Array.isArray(res.data) && res.data[0];
+        if (!cancelled) setPlanStatus(row?.status || null);
+      } catch {
+        if (!cancelled) setPlanStatus(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [partNumber, salesOrderId, opNo]);
+
+  const planLocked = planStatus === 'confirmed';
 
   const loadNotes = useCallback(async () => {
     const pid = partId ? Number(partId) : null;
@@ -309,6 +338,10 @@ const QMSInspector = () => {
   }, []);
 
   const handleDeleteSelectedRows = useCallback(() => {
+    if (planLocked) {
+      message.warning('Plan is confirmed. Characteristics cannot be deleted.');
+      return;
+    }
     if (!selectedRowIds.length) return;
     Modal.confirm({
       title: `Delete ${selectedRowIds.length} characteristic(s)?`,
@@ -331,10 +364,11 @@ const QMSInspector = () => {
         }
       },
     });
-  }, [selectedRowIds, fetchMasterBoc, message]);
+  }, [selectedRowIds, fetchMasterBoc, message, planLocked]);
 
   useEffect(() => {
     const onKey = (e) => {
+      if (planLocked) return;
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
@@ -344,7 +378,7 @@ const QMSInspector = () => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedRowIds, handleDeleteSelectedRows]);
+  }, [selectedRowIds, handleDeleteSelectedRows, planLocked]);
 
   const balloonOverlays = useMemo(() => buildBalloonOverlaysFromBocRows(bocDisplay), [bocDisplay]);
 
@@ -435,6 +469,10 @@ const QMSInspector = () => {
 
   const onDetectionComplete = useCallback(
     async (data) => {
+      if (planLocked) {
+        message.warning('Plan is confirmed. Characteristics cannot be changed.');
+        return;
+      }
       const dims = Array.isArray(data?.dimensions) ? data.dimensions : [];
       const oid = Number(salesOrderId);
       if (dims.length) {
@@ -454,16 +492,27 @@ const QMSInspector = () => {
       }
       await fetchMasterBoc();
     },
-    [salesOrderId, partNumber, persistMasterBocDimensions, fetchMasterBoc, detectZonesForBoxes],
+    [planLocked, salesOrderId, partNumber, persistMasterBocDimensions, fetchMasterBoc, detectZonesForBoxes, message],
   );
 
-  const handleStampRegion = useCallback((region) => {
-    setPendingStampRegion(region);
-    setStampModalOpen(true);
-  }, []);
+  const handleStampRegion = useCallback(
+    (region) => {
+      if (planLocked) {
+        message.warning('Plan is confirmed. Characteristics cannot be changed.');
+        return;
+      }
+      setPendingStampRegion(region);
+      setStampModalOpen(true);
+    },
+    [planLocked, message],
+  );
 
   const handleStampModalOk = useCallback(
     async (formValues) => {
+      if (planLocked) {
+        message.warning('Plan is confirmed. Characteristics cannot be changed.');
+        return;
+      }
       const oid = Number(salesOrderId);
       if (!oid || !partNumber) {
         message.error('Order and part are required to save a stamped characteristic.');
@@ -509,11 +558,70 @@ const QMSInspector = () => {
         setStampSaving(false);
       }
     },
-    [salesOrderId, partNumber, pendingStampRegion, opNo, ipid, message, fetchMasterBoc, detectZoneForRegion],
+    [planLocked, salesOrderId, partNumber, pendingStampRegion, opNo, ipid, message, fetchMasterBoc, detectZoneForRegion],
   );
 
+  const handleConfirmPlan = useCallback(() => {
+    const oid = Number(salesOrderId);
+    const operationPk = Number(operationId);
+    if (!partNumber || !oid) {
+      message.error('Order and part are required.');
+      return;
+    }
+    if (!Number.isFinite(operationPk)) {
+      message.error('Operation is required to store ballooned drawing.');
+      return;
+    }
+    if (!bocRowsRaw.length) {
+      message.warning('Add at least one characteristic before confirming the plan.');
+      return;
+    }
+    Modal.confirm({
+      title: 'Confirm inspection plan?',
+      content:
+        'After confirmation, the inspection plan is locked.',
+      okText: 'Confirm',
+      onOk: async () => {
+        try {
+          const exporter = exportBalloonedRef.current;
+          if (typeof exporter !== 'function') {
+            throw new Error('Drawing is still rendering. Please wait a moment and try again.');
+          }
+          const blob = await exporter();
+          if (!blob) {
+            throw new Error('Failed to capture ballooned drawing.');
+          }
+          const fd = new FormData();
+          const safePart = (partNumber || 'part').replace(/[^a-zA-Z0-9_-]+/g, '_');
+          const fileName = `${safePart}_op${opNo}_balloon.png`;
+          fd.append('operation_id', String(operationPk));
+          fd.append('document_type', 'BALOON');
+          fd.append('document_version', '1.0');
+          fd.append('files', new File([blob], fileName, { type: 'image/png' }));
+          await axios.post(`${QUALITY_API_BASE_URL}/operation-documents/upload/`, fd, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+
+          await axios.put(`${QUALITY_API_BASE_URL}/quality/inspection-plan-status`, {
+            part_number: partNumber,
+            sales_order_id: oid,
+            op_no: opNo,
+            status: 'confirmed',
+          });
+          setPlanStatus('confirmed');
+          message.success('Inspection plan confirmed.');
+        } catch (err) {
+          console.error(err);
+          const detail = err.response?.data?.detail;
+          message.error(typeof detail === 'string' ? detail : err.message || 'Failed to confirm');
+          throw err;
+        }
+      },
+    });
+  }, [partNumber, salesOrderId, operationId, opNo, bocRowsRaw.length, message]);
+
   useEffect(() => {
-    if (!bocRowsRaw.length || !partId || !documentId) return;
+    if (!bocRowsRaw.length || !partId || !documentId || planLocked) return;
     let cancelled = false;
     (async () => {
       const withRects = bocRowsRaw
@@ -544,12 +652,25 @@ const QMSInspector = () => {
     return () => {
       cancelled = true;
     };
-  }, [bocRowsRaw, partId, documentId, detectZonesForBoxes, fetchMasterBoc, message]);
+  }, [bocRowsRaw, partId, documentId, detectZonesForBoxes, fetchMasterBoc, message, planLocked]);
 
-  const handleToolChange = useCallback((tool) => {
-    setActiveTool(tool);
-    if (tool === 'notes') setActiveTab('notes');
-  }, []);
+  const handleToolChange = useCallback(
+    (tool) => {
+      if (planLocked && (tool === 'select' || tool === 'stamp')) {
+        message.warning('Plan is confirmed. Use MEASURE mode to record results.');
+        return;
+      }
+      setActiveTool(tool);
+      if (tool === 'notes') setActiveTab('notes');
+    },
+    [planLocked, message],
+  );
+
+  useEffect(() => {
+    if (planLocked && (activeTool === 'select' || activeTool === 'stamp')) {
+      setActiveTool('pan');
+    }
+  }, [planLocked, activeTool]);
 
   const noteOverlays = useMemo(
     () =>
@@ -648,6 +769,10 @@ const QMSInspector = () => {
   }, [message]);
 
   const handleClearAll = useCallback(() => {
+    if (planLocked) {
+      message.warning('Plan is confirmed. Characteristics cannot be cleared.');
+      return;
+    }
     if (!bocRowsRaw.length) return;
     Modal.confirm({
       title: 'Clear all characteristics?',
@@ -669,7 +794,7 @@ const QMSInspector = () => {
         }
       },
     });
-  }, [bocRowsRaw, fetchMasterBoc, message]);
+  }, [bocRowsRaw, fetchMasterBoc, message, planLocked]);
 
   const canDetect = Boolean(documentId && partId);
 
@@ -682,6 +807,9 @@ const QMSInspector = () => {
         operationName={operationName}
         mode={inspectorMode}
         onModeChange={setInspectorMode}
+        planStatus={planStatus}
+        onConfirmPlan={handleConfirmPlan}
+        confirmPlanDisabled={!bocRowsRaw.length || !salesOrderId || !partNumber}
       />
 
       {/* Plain divs — Ant Sider's internal wrapper breaks flex height chains */}
@@ -696,6 +824,7 @@ const QMSInspector = () => {
           onAutoBalloon={handleAutoBalloon}
           onClearAll={handleClearAll}
           clearAllDisabled={!bocRowsRaw.length}
+          planEditLocked={planLocked}
         />
 
         {/* PDF viewer */}
@@ -732,6 +861,9 @@ const QMSInspector = () => {
                 onDetectionComplete={onDetectionComplete}
                 onStampRegion={handleStampRegion}
                 onNoteRegion={handleNoteRegion}
+                onExportBalloonedReady={(fn) => {
+                  exportBalloonedRef.current = fn;
+                }}
                 loadingExternal={saving}
                 zoom={pdfZoom}
                 onZoomChange={setPdfZoom}
@@ -786,6 +918,7 @@ const QMSInspector = () => {
                     quantityOptions={quantityOptions}
                     quantityNo={quantityNo}
                     onQuantityChange={setQuantityNo}
+                    planEditLocked={planLocked}
                   />
                 ),
               },
