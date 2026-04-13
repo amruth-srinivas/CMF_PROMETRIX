@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Card, Empty, Modal, Space, Spin, Table, Tag, Typography, message } from 'antd';
+import { Button, Card, ConfigProvider, Empty, Modal, Space, Spin, Table, Tag, Typography, message } from 'antd';
 import {
   ClockCircleOutlined,
   CloudDownloadOutlined,
@@ -15,7 +15,35 @@ import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
 
 const { Title, Text } = Typography;
 
-const monoStyle = { fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace' };
+const FONT_STACK = '"JetBrains Mono", "JetBrains Mono NL", ui-monospace, "Cascadia Code", "Consolas", monospace';
+
+const monoStyle = { fontFamily: FONT_STACK };
+
+const themeInspectionQueue = {
+  token: {
+    fontFamily: FONT_STACK,
+    borderRadiusLG: 12,
+    colorPrimary: '#2563eb',
+    colorSuccess: '#059669',
+    colorWarning: '#d97706',
+  },
+  components: {
+    Table: {
+      headerBg: '#f1f5f9',
+      headerColor: '#334155',
+      rowHoverBg: '#f8fafc',
+      fontSize: 12,
+      cellPaddingBlockMD: 12,
+      cellPaddingInlineMD: 14,
+    },
+    Card: {
+      colorBgContainer: '#ffffff',
+    },
+    Tag: {
+      defaultBg: '#f1f5f9',
+    },
+  },
+};
 
 const fmtTol = (value) => {
   const n = Number(value);
@@ -224,13 +252,15 @@ const InspectionResults = () => {
       {
         title: 'Order',
         key: 'order',
-        width: 150,
+        width: 168,
         render: (_, record) => (
-          <div>
-            <Text strong>{record.sale_order_number ? `#${record.sale_order_number}` : `ID ${record.order_id}`}</Text>
+          <div style={{ lineHeight: 1.45 }}>
+            <Text strong style={{ fontSize: 13, color: '#0f172a', letterSpacing: '-0.02em' }}>
+              {record.sale_order_number ? `#${record.sale_order_number}` : `ID ${record.order_id}`}
+            </Text>
             <div>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                Order ID: {record.order_id}
+              <Text type="secondary" style={{ fontSize: 11, opacity: 0.85 }}>
+                order · {record.order_id}
               </Text>
             </div>
           </div>
@@ -239,12 +269,14 @@ const InspectionResults = () => {
       {
         title: 'Part',
         key: 'part',
-        width: 280,
+        width: 260,
         render: (_, record) => (
-          <div>
-            <Text strong>{record.part_number || '—'}</Text>
+          <div style={{ lineHeight: 1.45 }}>
+            <Text strong style={{ fontSize: 13, color: '#0f172a' }}>{record.part_number || '—'}</Text>
             <div>
-              <Text type="secondary">{record.part_name || '—'}</Text>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                {record.part_name || '—'}
+              </Text>
             </div>
           </div>
         ),
@@ -254,14 +286,14 @@ const InspectionResults = () => {
         key: 'operation',
         width: 220,
         render: (_, record) => (
-          <div>
-            <Text strong>
+          <div style={{ lineHeight: 1.45 }}>
+            <Text strong style={{ fontSize: 13, color: '#1e293b' }}>
               {record.operation_number != null ? `${record.operation_number}: ` : ''}
               {record.operation_name || '—'}
             </Text>
             <div>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                Op ID: {record.operation_id}
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                op #{record.operation_id}
               </Text>
             </div>
           </div>
@@ -270,132 +302,292 @@ const InspectionResults = () => {
       {
         title: 'Started',
         key: 'started_at',
-        width: 180,
+        width: 188,
         render: (_, record) => (
-          <Space size={6}>
-            <ClockCircleOutlined style={{ color: '#1677ff' }} />
-            <Text>{record.started_at ? new Date(record.started_at).toLocaleString() : '—'}</Text>
+          <Space size={8}>
+            <ClockCircleOutlined style={{ color: '#3b82f6', fontSize: 15 }} />
+            <Text style={{ fontSize: 12, color: '#475569' }}>
+              {record.started_at ? new Date(record.started_at).toLocaleString() : '—'}
+            </Text>
           </Space>
         ),
       },
       {
-        title: 'Plan Status',
+        title: 'Plan',
         key: 'plan',
-        width: 150,
+        width: 148,
+        align: 'center',
         render: (_, record) =>
-          record.has_inspection_plan ? <Tag color="success">Plan Available</Tag> : <Tag color="warning">Plan Needed</Tag>,
+          record.has_inspection_plan ? (
+            <Tag
+              style={{
+                margin: 0,
+                borderRadius: 8,
+                border: 'none',
+                padding: '2px 10px',
+                fontWeight: 600,
+                fontSize: 11,
+                letterSpacing: '0.02em',
+                background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                color: '#047857',
+              }}
+            >
+              Available
+            </Tag>
+          ) : (
+            <Tag
+              style={{
+                margin: 0,
+                borderRadius: 8,
+                border: 'none',
+                padding: '2px 10px',
+                fontWeight: 600,
+                fontSize: 11,
+                background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
+                color: '#b45309',
+              }}
+            >
+              Needed
+            </Tag>
+          ),
       },
       {
         title: 'Actions',
         key: 'actions',
         fixed: 'right',
-        width: 280,
+        width: 268,
         render: (_, record) =>
           record.has_inspection_plan ? (
-            <Space>
-              <Button type="primary" icon={<FileSearchOutlined />} onClick={() => void openPlanViewModal(record)}>
+            <Space size={8}>
+              <Button
+                type="primary"
+                icon={<FileSearchOutlined />}
+                onClick={() => void openPlanViewModal(record)}
+                style={{ borderRadius: 10, fontWeight: 600, height: 36 }}
+              >
                 View Plan
               </Button>
-              <Button icon={<ExperimentOutlined />} onClick={() => openInspector(record, 'MEASURE')}>
+              <Button
+                icon={<ExperimentOutlined />}
+                onClick={() => openInspector(record, 'MEASURE')}
+                style={{ borderRadius: 10, fontWeight: 600, height: 36 }}
+              >
                 Measure
               </Button>
             </Space>
           ) : (
-            <Space>
-              <Button type="primary" icon={<SendOutlined />} onClick={() => void sendPlanRequest(record)}>
+            <Space size={8}>
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                onClick={() => void sendPlanRequest(record)}
+                style={{ borderRadius: 10, fontWeight: 600, height: 36 }}
+              >
                 Send Request
               </Button>
-              <Button disabled title="Create an inspection plan first (via supervisor)">
+              <Button disabled title="Create an inspection plan first (via supervisor)" style={{ borderRadius: 10, height: 36 }}>
                 Measure
               </Button>
             </Space>
           ),
       },
     ],
-    [openInspector],
+    [openPlanViewModal, openInspector, sendPlanRequest],
   );
 
   return (
-    <div style={{ maxWidth: 1220 }}>
-      <Card
-        bordered={false}
+    <ConfigProvider theme={themeInspectionQueue}>
+      <div
         style={{
-          borderRadius: 14,
-          boxShadow: '0 6px 20px rgba(15, 23, 42, 0.08)',
-          marginBottom: 16,
-          background: 'linear-gradient(180deg, #f8fbff 0%, #ffffff 90%)',
+          width: '100%',
+          maxWidth: '100%',
+          boxSizing: 'border-box',
+          margin: 0,
+          padding: '8px 0 24px',
+          fontFamily: FONT_STACK,
+          minHeight: '100%',
         }}
-        bodyStyle={{ padding: '20px 24px' }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <ExperimentOutlined style={{ fontSize: 28, color: '#1677ff' }} />
-            <div>
-              <Title level={3} style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>
-                Inspection Queue
-              </Title>
-              <Text type="secondary" style={{ fontSize: 14 }}>
-                In-progress operations with quick access to QMS inspector modes
-              </Text>
-            </div>
-          </div>
-          <Button icon={<ReloadOutlined />} onClick={() => void load()}>
-            Refresh
-          </Button>
-        </div>
-        <Space size={12} wrap>
-          {machineLabel ? (
-            <Tag color="blue" style={{ padding: '4px 10px', borderRadius: 16 }}>
-              <ToolOutlined style={{ marginRight: 6 }} />
-              {machineLabel}
-            </Tag>
-          ) : null}
-          <Tag color="processing" style={{ padding: '4px 10px', borderRadius: 16 }}>
-            Active Operations: {total}
-          </Tag>
-        </Space>
-      </Card>
-
-      <Spin spinning={loading}>
-        {machineId == null && !loading ? (
-          <Card>
-            <Empty
-              description="Log in with a machine first (operator login, step 1) to see in-progress operations."
-            />
-          </Card>
-        ) : null}
-
-        {machineId != null && error ? (
-          <Card>
-            <Text type="danger">{error}</Text>
-            <div style={{ marginTop: 12 }}>
-              <Button onClick={() => void load()}>Retry</Button>
-            </div>
-          </Card>
-        ) : null}
-
-        {machineId != null && !error && !loading && total === 0 ? (
-          <Card>
-            <Empty description="No in-progress operations for this machine right now." />
-          </Card>
-        ) : null}
-
-        {machineId != null && !error && !loading && total > 0 ? (
-          <Card
-            bordered={false}
-            style={{ borderRadius: 14, boxShadow: '0 6px 20px rgba(15, 23, 42, 0.08)' }}
-            bodyStyle={{ padding: 0 }}
+        <Card
+          bordered={false}
+          style={{
+            borderRadius: 16,
+            marginBottom: 20,
+            border: '1px solid rgba(226, 232, 240, 0.95)',
+            boxShadow: '0 4px 24px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04)',
+            background: 'linear-gradient(145deg, #f8fafc 0%, #ffffff 48%, #f1f5f9 100%)',
+            overflow: 'hidden',
+          }}
+          bodyStyle={{ padding: '22px 26px 20px' }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: 20,
+              marginBottom: 14,
+              flexWrap: 'wrap',
+            }}
           >
-            <Table
-              columns={columns}
-              dataSource={tableData}
-              pagination={false}
-              scroll={{ x: 1200 }}
-              rowClassName={(_, index) => (index % 2 === 0 ? 'operator-row-even' : 'operator-row-odd')}
-            />
-          </Card>
-        ) : null}
-      </Spin>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 18 }}>
+              <div
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 14,
+                  background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)',
+                  flexShrink: 0,
+                }}
+              >
+                <ExperimentOutlined style={{ fontSize: 26, color: '#fff' }} />
+              </div>
+              <div>
+                <Title
+                  level={3}
+                  style={{
+                    margin: 0,
+                    fontSize: 22,
+                    fontWeight: 700,
+                    letterSpacing: '-0.03em',
+                    color: '#0f172a',
+                    fontFamily: FONT_STACK,
+                  }}
+                >
+                  Inspection Queue
+                </Title>
+                <Text type="secondary" style={{ fontSize: 13, display: 'block', marginTop: 6, lineHeight: 1.5 }}>
+                  In-progress operations — open the plan or measure characteristics on the drawing.
+                </Text>
+              </div>
+            </div>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => void load()}
+              style={{ borderRadius: 10, fontWeight: 600, height: 38 }}
+            >
+              Refresh
+            </Button>
+          </div>
+          <Space size={10} wrap>
+            {machineLabel ? (
+              <Tag
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 999,
+                  border: '1px solid #bfdbfe',
+                  background: '#eff6ff',
+                  color: '#1e40af',
+                  fontWeight: 600,
+                  fontSize: 12,
+                  margin: 0,
+                }}
+              >
+                <ToolOutlined style={{ marginRight: 8 }} />
+                {machineLabel}
+              </Tag>
+            ) : null}
+            <Tag
+              style={{
+                padding: '6px 14px',
+                borderRadius: 999,
+                border: '1px solid #e2e8f0',
+                background: '#f8fafc',
+                color: '#475569',
+                fontWeight: 600,
+                fontSize: 12,
+                margin: 0,
+              }}
+            >
+              Active · {total}
+            </Tag>
+          </Space>
+        </Card>
+
+        <Spin spinning={loading}>
+          {machineId == null && !loading ? (
+            <Card
+              style={{
+                borderRadius: 16,
+                border: '1px solid #e2e8f0',
+                boxShadow: '0 2px 12px rgba(15, 23, 42, 0.04)',
+              }}
+              bodyStyle={{ padding: 48 }}
+            >
+              <Empty
+                description={
+                  <span style={{ color: '#64748b', fontSize: 13 }}>
+                    Log in with a machine first (operator login) to see in-progress operations.
+                  </span>
+                }
+              />
+            </Card>
+          ) : null}
+
+          {machineId != null && error ? (
+            <Card
+              style={{ borderRadius: 16, border: '1px solid #fecaca', background: '#fef2f2' }}
+              bodyStyle={{ padding: 24 }}
+            >
+              <Text type="danger" style={{ fontSize: 13 }}>
+                {error}
+              </Text>
+              <div style={{ marginTop: 14 }}>
+                <Button onClick={() => void load()} style={{ borderRadius: 10, fontWeight: 600 }}>
+                  Retry
+                </Button>
+              </div>
+            </Card>
+          ) : null}
+
+          {machineId != null && !error && !loading && total === 0 ? (
+            <Card
+              style={{
+                borderRadius: 16,
+                border: '1px dashed #cbd5e1',
+                background: '#fafafa',
+              }}
+              bodyStyle={{ padding: 48 }}
+            >
+              <Empty
+                description={
+                  <span style={{ color: '#64748b', fontSize: 13 }}>No in-progress operations for this machine.</span>
+                }
+              />
+            </Card>
+          ) : null}
+
+          {machineId != null && !error && !loading && total > 0 ? (
+            <Card
+              bordered={false}
+              style={{
+                borderRadius: 16,
+                border: '1px solid rgba(226, 232, 240, 0.95)',
+                boxShadow: '0 4px 24px rgba(15, 23, 42, 0.06)',
+                overflow: 'hidden',
+              }}
+              bodyStyle={{ padding: 0 }}
+            >
+              <Table
+                columns={columns}
+                dataSource={tableData}
+                pagination={false}
+                style={{ width: '100%' }}
+                scroll={{ x: 'max-content' }}
+                size="middle"
+                onRow={(_, index) => ({
+                  style: {
+                    background: index % 2 === 0 ? '#ffffff' : '#f8fafc',
+                  },
+                })}
+              />
+            </Card>
+          ) : null}
+        </Spin>
 
       <Modal
         title={`Operation ${planViewMeta?.opNo || '—'}: ${planViewMeta?.opName || 'Details'}`}
@@ -468,7 +660,8 @@ const InspectionResults = () => {
           </div>
         </div>
       </Modal>
-    </div>
+      </div>
+    </ConfigProvider>
   );
 };
 

@@ -14,6 +14,7 @@ const AppLayout = ({ children }) => {
     location.pathname === '/admin/qms-inspector' ||
     location.pathname === '/supervisor/qms-inspector' ||
     location.pathname === '/operator/qms-inspector';
+  const isOperatorInspectionQueue = location.pathname.includes('/operator/inspection-results');
   const [collapsed, setCollapsed] = useState(false);
 
   if (isLoginPage || isInspectorPage) {
@@ -42,10 +43,16 @@ const AppLayout = ({ children }) => {
         <Navbar collapsed={collapsed} />
         <Content 
           style={{ 
-            margin: 'clamp(50px, 10vw, 60px) clamp(12px, 3vw, 24px) clamp(30px, 5vw, 40px)', 
-            overflowY: 'auto', 
-            backgroundColor: 'transparent', 
-            padding: 0 
+            margin: isOperatorInspectionQueue
+              ? 'clamp(50px, 10vw, 60px) 8px clamp(24px, 4vw, 36px)'
+              : 'clamp(50px, 10vw, 60px) clamp(12px, 3vw, 24px) clamp(30px, 5vw, 40px)',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            backgroundColor: 'transparent',
+            padding: 0,
+            width: '100%',
+            maxWidth: '100%',
+            boxSizing: 'border-box',
           }}
         >
           {children}

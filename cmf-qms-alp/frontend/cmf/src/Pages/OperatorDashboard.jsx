@@ -25,8 +25,18 @@ const OperatorDashboard = () => {
     return <Dashboard />;
   };
 
+  const fullBleed = path.includes('/inspection-results');
+
   return (
-    <div style={{ padding: '24px' }}>
+    <div
+      style={{
+        width: '100%',
+        maxWidth: '100%',
+        minWidth: 0,
+        boxSizing: 'border-box',
+        padding: fullBleed ? '0' : '24px',
+      }}
+    >
       {renderContent()}
     </div>
   );

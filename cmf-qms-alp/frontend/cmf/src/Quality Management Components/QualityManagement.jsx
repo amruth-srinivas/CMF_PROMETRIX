@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Layout, Button, Modal, Table, Spin, Drawer, message, Select } from 'antd';
+import { Layout, Button, Modal, Table, Spin, Drawer, message, Select, Alert, Tooltip } from 'antd';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { MenuOutlined, AppstoreOutlined, ShoppingCartOutlined, ClusterOutlined, ToolOutlined, InfoCircleOutlined, EyeOutlined, BuildOutlined, CheckCircleOutlined, CloudDownloadOutlined, EditOutlined } from "@ant-design/icons";
 import QualityManagementBOM from './QualityManagementBOM';
@@ -83,6 +83,10 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
   const [measureQtyOptions, setMeasureQtyOptions] = useState([{ value: 1, label: 'Qty 1' }]);
   const [measureQty, setMeasureQty] = useState(1);
   const [measureContext, setMeasureContext] = useState(null);
+  /** FTP status for the operation shown in Measurements modal (quality.ftp_status) */
+  const [measureFtpStatus, setMeasureFtpStatus] = useState(null);
+  /** Bump to reload ensure + rows after supervisor approves FTP while modal is open */
+  const [measureLoadNonce, setMeasureLoadNonce] = useState(0);
 
   useEffect(() => {
     const oid = effectiveOrderId;
@@ -397,6 +401,17 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
     return Number.isFinite(n) ? n : null;
   };
 
+  /** Prefer mean from #1–#3 when present; fixes bad stored measured_mean. */
+  const computeMeanFromMeasurements = (r) => {
+    const a = parseNum(r.measured_1);
+    const b = parseNum(r.measured_2);
+    const c = parseNum(r.measured_3);
+    const vals = [a, b, c].filter((v) => v != null);
+    if (!vals.length) return parseNum(r.measured_mean);
+    const m = vals.reduce((x, y) => x + y, 0) / vals.length;
+    return Number.isFinite(m) ? m : parseNum(r.measured_mean);
+  };
+
   const fmt4 = (value) => {
     const n = parseNum(value);
     return n == null ? '—' : n.toFixed(4);
@@ -407,7 +422,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
       const nominal = parseNum(r.nominal_value);
       const upper = parseNum(r.uppertol);
       const lower = parseNum(r.lowertol);
-      const mean = parseNum(r.measured_mean);
+      const mean = computeMeanFromMeasurements(r);
       const upperLimit = nominal != null && upper != null ? nominal + upper : null;
       const lowerLimit = nominal != null && lower != null ? nominal + lower : null;
       const hasTolerance = Math.abs(upper || 0) > 1e-12 || Math.abs(lower || 0) > 1e-12;
@@ -420,7 +435,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
         mean >= lowerLimit;
       const outOfTolerance = hasTolerance && mean != null && !withinTolerance;
       const status = !hasTolerance ? 'no_tolerance' : withinTolerance ? 'within' : outOfTolerance ? 'out' : 'pending';
-      return { ...r, _upperLimit: upperLimit, _lowerLimit: lowerLimit, _status: status };
+      return { ...r, _upperLimit: upperLimit, _lowerLimit: lowerLimit, _computedMean: mean, _status: status };
     });
   }, [measureRows]);
 
@@ -448,6 +463,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
       partNo: selectedItem?.part_number || '',
       orderId: oid,
     });
+    setMeasureFtpStatus(ftpStatusByOp[opNo] || null);
     setMeasureModalOpen(true);
     setMeasureRows([]);
     setMeasureQty(1);
@@ -464,10 +480,34 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
       const qOpts = Array.from({ length: qtyMax }, (_, i) => ({ value: i + 1, label: `Qty ${i + 1}` }));
       setMeasureQtyOptions(qOpts);
       setMeasureQty(1);
+      const ipid = buildFtpIpid(selectedItem.part_number, opNo);
+      try {
+        await axios.post(`${QUALITY_API_BASE_URL}/quality/stage-inspection/ensure`, null, {
+          params: {
+            part_id: selectedItem.id,
+            part_number: selectedItem.part_number,
+            sale_order_id: oid,
+            op_no: opNo,
+            quantity_no: 1,
+            ipid,
+            user_id: 1,
+          },
+        });
+      } catch (ensureErr) {
+        console.warn('stage-inspection/ensure', ensureErr);
+      }
       const res = await axios.get(`${QUALITY_API_BASE_URL}/quality/stage-inspection`, {
         params: { part_id: selectedItem.id, sale_order_id: oid, op_no: opNo, quantity_no: 1 },
       });
       setMeasureRows(Array.isArray(res.data) ? res.data : []);
+      try {
+        const fr = await axios.get(`${QUALITY_API_BASE_URL}/quality/ftp-status`, {
+          params: { order_id: oid, ipid, op_no: opNo },
+        });
+        setMeasureFtpStatus(fr.data?.status || null);
+      } catch {
+        setMeasureFtpStatus(null);
+      }
     } catch (err) {
       console.error(err);
       const detail = err.response?.data?.detail;
@@ -484,6 +524,32 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
     (async () => {
       try {
         setMeasureModalLoading(true);
+        const ipid = buildFtpIpid(measureContext.partNo, measureContext.opNo);
+        try {
+          await axios.post(`${QUALITY_API_BASE_URL}/quality/stage-inspection/ensure`, null, {
+            params: {
+              part_id: measureContext.partId,
+              part_number: measureContext.partNo,
+              sale_order_id: measureContext.orderId,
+              op_no: measureContext.opNo,
+              quantity_no: measureQty,
+              ipid,
+              user_id: 1,
+            },
+          });
+        } catch (ensureErr) {
+          if (ensureErr?.response?.status === 403) {
+            if (!cancelled) {
+              message.warning(
+                measureQty > 1
+                  ? 'FTP is not approved yet — quantity 2+ stage rows cannot be created until approval.'
+                  : 'Could not ensure stage rows.',
+              );
+            }
+          } else {
+            console.warn('stage-inspection/ensure', ensureErr);
+          }
+        }
         const res = await axios.get(`${QUALITY_API_BASE_URL}/quality/stage-inspection`, {
           params: {
             part_id: measureContext.partId,
@@ -493,6 +559,14 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
           },
         });
         if (!cancelled) setMeasureRows(Array.isArray(res.data) ? res.data : []);
+        try {
+          const fr = await axios.get(`${QUALITY_API_BASE_URL}/quality/ftp-status`, {
+            params: { order_id: measureContext.orderId, ipid, op_no: measureContext.opNo },
+          });
+          if (!cancelled) setMeasureFtpStatus(fr.data?.status || null);
+        } catch {
+          if (!cancelled) setMeasureFtpStatus(null);
+        }
       } catch (err) {
         if (cancelled) return;
         console.error(err);
@@ -506,7 +580,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
     return () => {
       cancelled = true;
     };
-  }, [measureModalOpen, measureContext, measureQty]);
+  }, [measureModalOpen, measureContext, measureQty, measureLoadNonce]);
 
   /** Ant Design Tag `color` for dimension_type — Length (blue) vs Diameter (orange) vs GDT (purple). */
   const dimensionTypeTagColor = (value) => {
@@ -919,6 +993,10 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                                     });
                                     setFtpStatusByOp((prev) => ({ ...prev, [opNo]: 'approved' }));
                                     message.success(`FTP approved for operation ${opNo}.`);
+                                    if (measureModalOpen && measureContext?.opNo === opNo) {
+                                      setMeasureFtpStatus('approved');
+                                      setMeasureLoadNonce((n) => n + 1);
+                                    }
                                   } catch (err) {
                                     console.error(err);
                                     const detail = err.response?.data?.detail;
@@ -1067,10 +1145,35 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
                       <Text style={{ fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace' }}><b>Production Order:</b> {measureContext?.orderId || '—'}</Text>
                       <Text style={{ fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace' }}><b>Part Number:</b> {measureContext?.partNo || '—'}</Text>
                       <Text style={{ fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace' }}><b>Operation:</b> {measureContext?.opName ? `OP ${measureContext?.opNo} (${measureContext.opName})` : `OP ${measureContext?.opNo ?? '—'}`}</Text>
+                      <Tooltip title="FTP (first-time pass) applies to this order and operation. Operators request approval after quantity 1; quantity 2+ stays locked until approved.">
+                        <Tag
+                          color={
+                            measureFtpStatus === 'approved'
+                              ? 'success'
+                              : measureFtpStatus === 'pending'
+                                ? 'processing'
+                                : measureFtpStatus === 'rejected'
+                                  ? 'error'
+                                  : 'default'
+                          }
+                          style={{ margin: 0, fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace' }}
+                        >
+                          FTP: {(measureFtpStatus || 'not requested').toString().toUpperCase()}
+                        </Tag>
+                      </Tooltip>
+                      {measureQty > 1 ? (
+                        <Tag color={measureFtpStatus === 'approved' ? 'success' : 'warning'} style={{ margin: 0 }}>
+                          Selected Qty {measureQty}: {measureFtpStatus === 'approved' ? 'FTP approved — plan + measurements can load' : 'FTP not approved — operators cannot record this quantity yet'}
+                        </Tag>
+                      ) : (
+                        <Tag color="blue" style={{ margin: 0 }}>
+                          Qty 1: complete measurements, then request FTP approval
+                        </Tag>
+                      )}
                     </div>
                     <Space align="center">
                       <Text style={{ fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace' }}><b>Qty:</b></Text>
@@ -1083,6 +1186,14 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                       />
                     </Space>
                   </div>
+                  {measureQty > 1 && measureFtpStatus !== 'approved' ? (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message="Quantity 2 and above require FTP approval."
+                      description="After you click Approve FTP in the operations list, stage rows are created and this table shows both the plan (nominal / limits) and actual readings for the selected quantity."
+                    />
+                  ) : null}
                   <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', overflow: 'hidden' }}>
                     <div style={{ padding: '8px 12px', borderBottom: '1px solid #eef0f3', background: '#fafbfc', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                       <Tag color="default" style={{ margin: 0, borderRadius: 12 }}>Total: {measureSummary.total}</Tag>
@@ -1112,45 +1223,58 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                             </Tag>
                           ),
                         },
-                        { title: 'Nominal', dataIndex: 'nominal_value', key: 'nominal_value', width: 110, render: (v) => <Text strong>{v ?? '—'}</Text> },
-                        { title: 'Upper', dataIndex: 'uppertol', key: 'uppertol', width: 90, render: (v) => <Text style={{ color: Number(v) > 0 ? '#15803d' : '#6b7280' }}>{fmtTol(v)}</Text> },
-                        { title: 'Lower', dataIndex: 'lowertol', key: 'lowertol', width: 90, render: (v) => <Text style={{ color: Number(v) < 0 ? '#b91c1c' : '#6b7280' }}>{fmtTol(v)}</Text> },
                         {
-                          title: 'Upper Limit',
-                          key: 'upper_limit',
-                          width: 120,
-                          render: (_, r) => <Text style={{ color: '#166534' }}>{fmt4(r._upperLimit)}</Text>,
+                          title: 'Plan (from inspection plan)',
+                          key: 'plan_group',
+                          children: [
+                            { title: 'Nominal', dataIndex: 'nominal_value', key: 'nominal_value', width: 110, render: (v) => <Text strong>{v ?? '—'}</Text> },
+                            { title: 'Upper', dataIndex: 'uppertol', key: 'uppertol', width: 90, render: (v) => <Text style={{ color: Number(v) > 0 ? '#15803d' : '#6b7280' }}>{fmtTol(v)}</Text> },
+                            { title: 'Lower', dataIndex: 'lowertol', key: 'lowertol', width: 90, render: (v) => <Text style={{ color: Number(v) < 0 ? '#b91c1c' : '#6b7280' }}>{fmtTol(v)}</Text> },
+                            {
+                              title: 'Upper Limit',
+                              key: 'upper_limit',
+                              width: 120,
+                              render: (_, r) => <Text style={{ color: '#166534' }}>{fmt4(r._upperLimit)}</Text>,
+                            },
+                            {
+                              title: 'Lower Limit',
+                              key: 'lower_limit',
+                              width: 120,
+                              render: (_, r) => <Text style={{ color: '#991b1b' }}>{fmt4(r._lowerLimit)}</Text>,
+                            },
+                          ],
                         },
                         {
-                          title: 'Lower Limit',
-                          key: 'lower_limit',
-                          width: 120,
-                          render: (_, r) => <Text style={{ color: '#991b1b' }}>{fmt4(r._lowerLimit)}</Text>,
-                        },
-                        { title: '#1', dataIndex: 'measured_1', key: 'measured_1', width: 90 },
-                        { title: '#2', dataIndex: 'measured_2', key: 'measured_2', width: 90 },
-                        { title: '#3', dataIndex: 'measured_3', key: 'measured_3', width: 90 },
-                        {
-                          title: 'Mean',
-                          dataIndex: 'measured_mean',
-                          key: 'measured_mean',
-                          width: 110,
-                          render: (v, r) => {
-                            if (r._status === 'within') return <Text strong style={{ color: '#15803d' }}>{v || '—'}</Text>;
-                            if (r._status === 'out') return <Text strong style={{ color: '#dc2626' }}>{v || '—'}</Text>;
-                            return <Text style={{ color: '#4b5563' }}>{v || '—'}</Text>;
-                          },
-                        },
-                        {
-                          title: 'Status',
-                          key: 'status',
-                          width: 130,
-                          render: (_, r) => {
-                            if (r._status === 'within') return <Tag color="success" style={{ margin: 0, borderRadius: 10 }}>Within Tol</Tag>;
-                            if (r._status === 'out') return <Tag color="error" style={{ margin: 0, borderRadius: 10 }}>Out Tol</Tag>;
-                            if (r._status === 'no_tolerance') return <Tag color="processing" style={{ margin: 0, borderRadius: 10 }}>No Tol</Tag>;
-                            return <Tag style={{ margin: 0, borderRadius: 10 }}>Pending</Tag>;
-                          },
+                          title: 'Actual (measurements)',
+                          key: 'actual_group',
+                          children: [
+                            { title: '#1', dataIndex: 'measured_1', key: 'measured_1', width: 90 },
+                            { title: '#2', dataIndex: 'measured_2', key: 'measured_2', width: 90 },
+                            { title: '#3', dataIndex: 'measured_3', key: 'measured_3', width: 90 },
+                            {
+                              title: 'Mean',
+                              key: 'mean_computed',
+                              width: 110,
+                              render: (_, r) => {
+                                const m = r._computedMean;
+                                const display = m == null ? '—' : fmt4(m);
+                                if (r._status === 'within') return <Text strong style={{ color: '#15803d' }}>{display}</Text>;
+                                if (r._status === 'out') return <Text strong style={{ color: '#dc2626' }}>{display}</Text>;
+                                return <Text style={{ color: '#4b5563' }}>{display}</Text>;
+                              },
+                            },
+                            {
+                              title: 'Status',
+                              key: 'status',
+                              width: 130,
+                              render: (_, r) => {
+                                if (r._status === 'within') return <Tag color="success" style={{ margin: 0, borderRadius: 10 }}>Within Tol</Tag>;
+                                if (r._status === 'out') return <Tag color="error" style={{ margin: 0, borderRadius: 10 }}>Out Tol</Tag>;
+                                if (r._status === 'no_tolerance') return <Tag color="processing" style={{ margin: 0, borderRadius: 10 }}>No Tol</Tag>;
+                                return <Tag style={{ margin: 0, borderRadius: 10 }}>Pending</Tag>;
+                              },
+                            },
+                          ],
                         },
                       ]}
                     />
