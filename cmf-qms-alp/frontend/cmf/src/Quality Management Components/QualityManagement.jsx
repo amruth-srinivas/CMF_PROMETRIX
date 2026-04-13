@@ -87,6 +87,11 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
   const [measureFtpStatus, setMeasureFtpStatus] = useState(null);
   /** Bump to reload ensure + rows after supervisor approves FTP while modal is open */
   const [measureLoadNonce, setMeasureLoadNonce] = useState(0);
+  /** Supervisor: preview Qty 1 measurements before confirming FTP approval */
+  const [ftpApproveModalOpen, setFtpApproveModalOpen] = useState(false);
+  const [ftpApproveLoading, setFtpApproveLoading] = useState(false);
+  const [ftpApproveRows, setFtpApproveRows] = useState([]);
+  const [ftpApproveContext, setFtpApproveContext] = useState(null);
 
   useEffect(() => {
     const oid = effectiveOrderId;
@@ -447,6 +452,137 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
     const passRate = total ? ((within / total) * 100).toFixed(1) : '0.0';
     return { total, within, out, noTol, passRate };
   }, [measureDecoratedRows]);
+
+  const ftpApproveDecoratedRows = useMemo(() => {
+    return (ftpApproveRows || []).map((r) => {
+      const nominal = parseNum(r.nominal_value);
+      const upper = parseNum(r.uppertol);
+      const lower = parseNum(r.lowertol);
+      const mean = computeMeanFromMeasurements(r);
+      const upperLimit = nominal != null && upper != null ? nominal + upper : null;
+      const lowerLimit = nominal != null && lower != null ? nominal + lower : null;
+      const hasTolerance = Math.abs(upper || 0) > 1e-12 || Math.abs(lower || 0) > 1e-12;
+      const withinTolerance =
+        hasTolerance &&
+        mean != null &&
+        upperLimit != null &&
+        lowerLimit != null &&
+        mean <= upperLimit &&
+        mean >= lowerLimit;
+      const outOfTolerance = hasTolerance && mean != null && !withinTolerance;
+      const status = !hasTolerance ? 'no_tolerance' : withinTolerance ? 'within' : outOfTolerance ? 'out' : 'pending';
+      return { ...r, _upperLimit: upperLimit, _lowerLimit: lowerLimit, _computedMean: mean, _status: status };
+    });
+  }, [ftpApproveRows]);
+
+  const ftpApproveSummary = useMemo(() => {
+    const total = ftpApproveDecoratedRows.length;
+    const within = ftpApproveDecoratedRows.filter((r) => r._status === 'within').length;
+    const out = ftpApproveDecoratedRows.filter((r) => r._status === 'out').length;
+    const noTol = ftpApproveDecoratedRows.filter((r) => r._status === 'no_tolerance').length;
+    const passRate = total ? ((within / total) * 100).toFixed(1) : '0.0';
+    return { total, within, out, noTol, passRate };
+  }, [ftpApproveDecoratedRows]);
+
+  const openFtpApproveModal = async (record) => {
+    const oid = effectiveOrderId && String(effectiveOrderId) !== 'null' ? Number(effectiveOrderId) : null;
+    if (!oid || !selectedItem?.part_number || !selectedItem?.id) {
+      message.error('Order and part are required to review FTP.');
+      return;
+    }
+    const opNo = parseOpNo(record);
+    setFtpApproveContext({
+      opNo,
+      opName: record?.operation_name || '',
+      partNo: selectedItem.part_number,
+      partId: selectedItem.id,
+      orderId: oid,
+    });
+    setFtpApproveModalOpen(true);
+    setFtpApproveRows([]);
+    setFtpApproveLoading(true);
+    const ipid = buildFtpIpid(selectedItem.part_number, opNo);
+    try {
+      try {
+        await axios.post(`${QUALITY_API_BASE_URL}/quality/stage-inspection/ensure`, null, {
+          params: {
+            part_id: selectedItem.id,
+            part_number: selectedItem.part_number,
+            sale_order_id: oid,
+            op_no: opNo,
+            quantity_no: 1,
+            ipid,
+            user_id: 1,
+          },
+        });
+      } catch (ensureErr) {
+        console.warn('stage-inspection/ensure', ensureErr);
+      }
+      const res = await axios.get(`${QUALITY_API_BASE_URL}/quality/stage-inspection`, {
+        params: {
+          part_id: selectedItem.id,
+          sale_order_id: oid,
+          op_no: opNo,
+          quantity_no: 1,
+        },
+      });
+      setFtpApproveRows(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error(err);
+      const detail = err.response?.data?.detail;
+      message.error(typeof detail === 'string' ? detail : err.message || 'Failed to load quantity 1 measurements');
+      setFtpApproveRows([]);
+    } finally {
+      setFtpApproveLoading(false);
+    }
+  };
+
+  const runFtpApprovalApi = async (opNo) => {
+    const oid = effectiveOrderId && String(effectiveOrderId) !== 'null' ? Number(effectiveOrderId) : null;
+    const partNo = selectedItem?.part_number;
+    if (!oid || !partNo) {
+      message.error('Missing order/part for FTP approval.');
+      return;
+    }
+    await axios.put(`${QUALITY_API_BASE_URL}/quality/ftp-status`, {
+      order_id: oid,
+      ipid: buildFtpIpid(partNo, opNo),
+      status: 'approved',
+      is_completed: true,
+    });
+    setFtpStatusByOp((prev) => ({ ...prev, [opNo]: 'approved' }));
+    message.success(`FTP approved for operation ${opNo}.`);
+    if (measureModalOpen && measureContext?.opNo === opNo) {
+      setMeasureFtpStatus('approved');
+      setMeasureLoadNonce((n) => n + 1);
+    }
+  };
+
+  const confirmAndApproveFtp = () => {
+    const opNo = ftpApproveContext?.opNo;
+    if (opNo == null) return;
+    Modal.confirm({
+      title: 'Confirm FTP approval',
+      content:
+        'You are approving first-time pass (FTP) for this operation based on quantity 1 measurements. Operators will be allowed to record quantity 2 and above. This action should match your shop-floor sign-off.',
+      okText: 'Yes, approve FTP',
+      cancelText: 'Back',
+      okButtonProps: { type: 'primary' },
+      onOk: async () => {
+        try {
+          await runFtpApprovalApi(opNo);
+          setFtpApproveModalOpen(false);
+          setFtpApproveContext(null);
+          setFtpApproveRows([]);
+        } catch (err) {
+          console.error(err);
+          const detail = err.response?.data?.detail;
+          message.error(typeof detail === 'string' ? detail : err.message || 'Failed to approve FTP');
+          throw err;
+        }
+      },
+    });
+  };
 
   const openMeasurementsModal = async (record) => {
     const oid = effectiveOrderId && String(effectiveOrderId) !== 'null' ? Number(effectiveOrderId) : null;
@@ -974,36 +1110,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                               Measurements
                             </Button>
                             {isSupervisorView && ftpStatus === 'pending' && (
-                              <Button
-                                size="small"
-                                type="primary"
-                                onClick={async () => {
-                                  const oid = effectiveOrderId && String(effectiveOrderId) !== 'null' ? Number(effectiveOrderId) : null;
-                                  const partNo = selectedItem?.part_number;
-                                  if (!oid || !partNo) {
-                                    message.error('Missing order/part for FTP approval.');
-                                    return;
-                                  }
-                                  try {
-                                    await axios.put(`${QUALITY_API_BASE_URL}/quality/ftp-status`, {
-                                      order_id: oid,
-                                      ipid: buildFtpIpid(partNo, opNo),
-                                      status: 'approved',
-                                      is_completed: true,
-                                    });
-                                    setFtpStatusByOp((prev) => ({ ...prev, [opNo]: 'approved' }));
-                                    message.success(`FTP approved for operation ${opNo}.`);
-                                    if (measureModalOpen && measureContext?.opNo === opNo) {
-                                      setMeasureFtpStatus('approved');
-                                      setMeasureLoadNonce((n) => n + 1);
-                                    }
-                                  } catch (err) {
-                                    console.error(err);
-                                    const detail = err.response?.data?.detail;
-                                    message.error(typeof detail === 'string' ? detail : err.message || 'Failed to approve FTP');
-                                  }
-                                }}
-                              >
+                              <Button size="small" type="primary" onClick={() => void openFtpApproveModal(record)}>
                                 Approve FTP
                               </Button>
                             )}
@@ -1279,6 +1386,189 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                       ]}
                     />
                   </div>
+                </div>
+              </Modal>
+
+              <Modal
+                title={
+                  ftpApproveContext
+                    ? `Review FTP — Quantity 1 · OP ${ftpApproveContext.opNo}${ftpApproveContext.opName ? ` (${ftpApproveContext.opName})` : ''}`
+                    : 'Review FTP'
+                }
+                centered
+                width="96%"
+                open={ftpApproveModalOpen}
+                onCancel={() => {
+                  setFtpApproveModalOpen(false);
+                  setFtpApproveContext(null);
+                  setFtpApproveRows([]);
+                }}
+                destroyOnClose
+                footer={
+                  <Space>
+                    <Button
+                      onClick={() => {
+                        setFtpApproveModalOpen(false);
+                        setFtpApproveContext(null);
+                        setFtpApproveRows([]);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="primary"
+                      disabled={
+                        ftpApproveLoading ||
+                        !ftpApproveContext ||
+                        ftpApproveDecoratedRows.length === 0
+                      }
+                      onClick={() => confirmAndApproveFtp()}
+                    >
+                      Approve FTP…
+                    </Button>
+                  </Space>
+                }
+                styles={{ body: { maxHeight: '78vh', overflow: 'auto', padding: 12, background: '#f7f8fa' } }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace' }}>
+                  {ftpApproveContext ? (
+                    <div
+                      style={{
+                        border: '1px solid #e5e7eb',
+                        borderRadius: 8,
+                        background: '#fff',
+                        padding: '10px 12px',
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: 12,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Text>
+                        <b>Order:</b> {ftpApproveContext.orderId}
+                      </Text>
+                      <Text>
+                        <b>Part:</b> {ftpApproveContext.partNo}
+                      </Text>
+                      <Tag color="processing" style={{ margin: 0 }}>
+                        Quantity 1 (first-time pass review)
+                      </Tag>
+                    </div>
+                  ) : null}
+                  {!ftpApproveLoading && ftpApproveDecoratedRows.length === 0 ? (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message="No quantity 1 measurement rows found."
+                      description="Ensure the operator has completed quantity 1 in the inspector and requested FTP. If the plan exists, try refreshing after measurements are saved."
+                    />
+                  ) : null}
+                  {ftpApproveDecoratedRows.some((r) => r._status === 'out') ? (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message="Some characteristics are out of tolerance on quantity 1."
+                      description="You can still approve FTP if this is acceptable for your process; otherwise reject with the operator and re-measure."
+                    />
+                  ) : null}
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', overflow: 'hidden' }}>
+                    <div style={{ padding: '8px 12px', borderBottom: '1px solid #eef0f3', background: '#fafbfc', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <Tag color="default" style={{ margin: 0, borderRadius: 12 }}>
+                        Total: {ftpApproveSummary.total}
+                      </Tag>
+                      <Tag color="success" style={{ margin: 0, borderRadius: 12 }}>
+                        Within Tol: {ftpApproveSummary.within}
+                      </Tag>
+                      <Tag color="error" style={{ margin: 0, borderRadius: 12 }}>
+                        Out Tol: {ftpApproveSummary.out}
+                      </Tag>
+                      <Tag color="processing" style={{ margin: 0, borderRadius: 12 }}>
+                        No Tol: {ftpApproveSummary.noTol}
+                      </Tag>
+                      <Tag color="blue" style={{ margin: 0, borderRadius: 12 }}>
+                        Pass Rate: {ftpApproveSummary.passRate}%
+                      </Tag>
+                    </div>
+                    <Table
+                      size="small"
+                      loading={ftpApproveLoading}
+                      dataSource={ftpApproveDecoratedRows}
+                      rowKey="id"
+                      pagination={false}
+                      scroll={{ x: 'max-content', y: Math.min(420, Math.max(160, ftpApproveDecoratedRows.length * 44 + 70)) }}
+                      columns={[
+                        { title: 'S.No', key: 'sno', width: 64, render: (_, __, idx) => idx + 1 },
+                        { title: 'Zone', dataIndex: 'zone', key: 'zone', width: 82, render: (z) => <Tag color="geekblue" style={{ margin: 0, borderRadius: 10 }}>{z || '—'}</Tag> },
+                        {
+                          title: 'Type',
+                          dataIndex: 'dimension_type',
+                          key: 'dimension_type',
+                          width: 160,
+                          render: (v) => (
+                            <Tag color={dimensionTypeTagColor(v)} style={{ margin: 0, borderRadius: 10 }}>
+                              {v || '—'}
+                            </Tag>
+                          ),
+                        },
+                        {
+                          title: 'Plan (from inspection plan)',
+                          key: 'plan_group_ftp',
+                          children: [
+                            { title: 'Nominal', dataIndex: 'nominal_value', key: 'nominal_value', width: 100, render: (v) => <Text strong>{v ?? '—'}</Text> },
+                            { title: 'Upper', dataIndex: 'uppertol', key: 'uppertol', width: 80, render: (v) => <Text style={{ color: Number(v) > 0 ? '#15803d' : '#6b7280' }}>{fmtTol(v)}</Text> },
+                            { title: 'Lower', dataIndex: 'lowertol', key: 'lowertol', width: 80, render: (v) => <Text style={{ color: Number(v) < 0 ? '#b91c1c' : '#6b7280' }}>{fmtTol(v)}</Text> },
+                            {
+                              title: 'Upper Limit',
+                              key: 'ul',
+                              width: 108,
+                              render: (_, r) => <Text style={{ color: '#166534' }}>{fmt4(r._upperLimit)}</Text>,
+                            },
+                            {
+                              title: 'Lower Limit',
+                              key: 'll',
+                              width: 108,
+                              render: (_, r) => <Text style={{ color: '#991b1b' }}>{fmt4(r._lowerLimit)}</Text>,
+                            },
+                          ],
+                        },
+                        {
+                          title: 'Actual (Qty 1)',
+                          key: 'actual_group_ftp',
+                          children: [
+                            { title: '#1', dataIndex: 'measured_1', key: 'measured_1', width: 72 },
+                            { title: '#2', dataIndex: 'measured_2', key: 'measured_2', width: 72 },
+                            { title: '#3', dataIndex: 'measured_3', key: 'measured_3', width: 72 },
+                            {
+                              title: 'Mean',
+                              key: 'mean_c',
+                              width: 96,
+                              render: (_, r) => {
+                                const m = r._computedMean;
+                                const display = m == null ? '—' : fmt4(m);
+                                if (r._status === 'within') return <Text strong style={{ color: '#15803d' }}>{display}</Text>;
+                                if (r._status === 'out') return <Text strong style={{ color: '#dc2626' }}>{display}</Text>;
+                                return <Text style={{ color: '#4b5563' }}>{display}</Text>;
+                              },
+                            },
+                            {
+                              title: 'Status',
+                              key: 'st',
+                              width: 118,
+                              render: (_, r) => {
+                                if (r._status === 'within') return <Tag color="success" style={{ margin: 0, borderRadius: 10 }}>Within Tol</Tag>;
+                                if (r._status === 'out') return <Tag color="error" style={{ margin: 0, borderRadius: 10 }}>Out Tol</Tag>;
+                                if (r._status === 'no_tolerance') return <Tag color="processing" style={{ margin: 0, borderRadius: 10 }}>No Tol</Tag>;
+                                return <Tag style={{ margin: 0, borderRadius: 10 }}>Pending</Tag>;
+                              },
+                            },
+                          ],
+                        },
+                      ]}
+                    />
+                  </div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    Click &quot;Approve FTP…&quot; to confirm in a second step. Approval unlocks quantity 2+ for operators.
+                  </Text>
                 </div>
               </Modal>
 
