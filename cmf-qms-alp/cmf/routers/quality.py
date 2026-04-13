@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from DB.database import get_db
-from DB.models.quality import MasterBoc, StageInspection, Note, InspectionPlanStatus
+from DB.models.quality import MasterBoc, StageInspection, Note, InspectionPlanStatus, FTP
 from DB.models.oms import Part, Order
 from DB.models.access_control import AccessUser
 from DB.schemas.quality_api import (
@@ -19,6 +19,9 @@ from DB.schemas.quality_api import (
     MasterBocUpdate,
     StageInspectionResponse,
     StageInspectionUpdate,
+    StageInspectionMeasurementSummary,
+    FTPStatusUpsert,
+    FTPStatusResponse,
     NoteCreate,
     NoteUpdate,
     NoteResponse,
@@ -29,6 +32,7 @@ from DB.schemas.quality_api import (
 router = APIRouter(prefix="/quality", tags=["quality"])
 
 _ALLOWED_INSPECTION_PLAN_STATUS = frozenset({"draft", "confirmed"})
+_ALLOWED_FTP_STATUS = frozenset({"pending", "approved", "rejected"})
 
 
 def _master_boc_id_from_stage_bbox(bbox: Optional[str]) -> Optional[int]:
@@ -55,6 +59,27 @@ def _resolve_stage_inspection_user_id(db: Session, requested: Optional[int]) -> 
     return u.id if u is not None else 1
 
 
+def _normalized_ipid(ipid: Optional[str], op_no: Optional[int]) -> str:
+    raw = (ipid or "").strip()
+    if raw and raw.upper() != "AUTO":
+        return raw[:255]
+    if op_no is not None:
+        return f"OP_{op_no}"[:255]
+    return "AUTO"
+
+
+def _is_ftp_approved(db: Session, order_id: int, ipid: str) -> bool:
+    row = (
+        db.query(FTP)
+        .filter(
+            FTP.order_id == order_id,
+            FTP.ipid == ipid,
+        )
+        .first()
+    )
+    return bool(row and row.status == "approved" and row.is_completed)
+
+
 @router.get("/inspection-plan-status", response_model=List[InspectionPlanStatusResponse])
 def list_inspection_plan_status(
     part_number: str = Query(..., description="oms.parts.part_number"),
@@ -69,6 +94,59 @@ def list_inspection_plan_status(
     if op_no is not None:
         q = q.filter(InspectionPlanStatus.op_no == op_no)
     return q.order_by(InspectionPlanStatus.op_no.asc()).all()
+
+
+@router.get("/ftp-status", response_model=Optional[FTPStatusResponse])
+def get_ftp_status(
+    order_id: int = Query(...),
+    ipid: str = Query(...),
+    op_no: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+):
+    norm_ipid = _normalized_ipid(ipid, op_no)
+    row = (
+        db.query(FTP)
+        .filter(
+            FTP.order_id == order_id,
+            FTP.ipid == norm_ipid,
+        )
+        .first()
+    )
+    return row
+
+
+@router.put("/ftp-status", response_model=FTPStatusResponse)
+def upsert_ftp_status(body: FTPStatusUpsert, db: Session = Depends(get_db)):
+    norm_ipid = _normalized_ipid(body.ipid, None)
+    st = (body.status or "pending").strip().lower()
+    if st not in _ALLOWED_FTP_STATUS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"status must be one of: {', '.join(sorted(_ALLOWED_FTP_STATUS))}",
+        )
+    row = (
+        db.query(FTP)
+        .filter(
+            FTP.order_id == body.order_id,
+            FTP.ipid == norm_ipid,
+        )
+        .first()
+    )
+    completed = body.is_completed if body.is_completed is not None else (st == "approved")
+    if row:
+        row.status = st
+        row.is_completed = bool(completed)
+    else:
+        row = FTP(
+            order_id=body.order_id,
+            ipid=norm_ipid,
+            status=st,
+            is_completed=bool(completed),
+        )
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 @router.put("/inspection-plan-status", response_model=InspectionPlanStatusResponse)
@@ -108,6 +186,13 @@ def upsert_inspection_plan_status(body: InspectionPlanStatusUpsert, db: Session 
             status=st,
         )
         db.add(row)
+
+    if st == "confirmed":
+        raw_name = (body.confirmed_by_username or "").strip()
+        row.confirmed_by_username = raw_name[:255] if raw_name else None
+    else:
+        row.confirmed_by_username = None
+
     db.commit()
     db.refresh(row)
     return row
@@ -245,6 +330,34 @@ def list_stage_inspection(
     return q.order_by(StageInspection.id.asc()).all()
 
 
+def _stage_row_has_measurement(row: StageInspection) -> bool:
+    for attr in ("measured_1", "measured_2", "measured_3", "measured_mean"):
+        v = getattr(row, attr, None)
+        if v is not None and str(v).strip():
+            return True
+    return False
+
+
+@router.get("/stage-inspection/measurement-summary", response_model=StageInspectionMeasurementSummary)
+def stage_inspection_measurement_summary(
+    part_id: int = Query(..., description="OMS parts.id (integer)"),
+    sale_order_id: int = Query(...),
+    op_no: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Across all quantity rows: whether any measurement value has been entered."""
+    rows = (
+        db.query(StageInspection)
+        .filter(
+            StageInspection.part_id == part_id,
+            StageInspection.sale_order_id == sale_order_id,
+            StageInspection.op_no == op_no,
+        )
+        .all()
+    )
+    return StageInspectionMeasurementSummary(any_recorded=any(_stage_row_has_measurement(r) for r in rows))
+
+
 @router.post("/stage-inspection/ensure", response_model=List[StageInspectionResponse])
 def ensure_stage_inspection_rows(
     part_id: int = Query(..., description="OMS parts.id"),
@@ -253,6 +366,7 @@ def ensure_stage_inspection_rows(
     op_no: int = Query(...),
     quantity_no: int = Query(1, ge=1),
     user_id: Optional[int] = Query(None),
+    ipid: Optional[str] = Query(None, description="FTP key for this operation"),
     db: Session = Depends(get_db),
 ):
     """
@@ -260,6 +374,12 @@ def ensure_stage_inspection_rows(
     with bbox {\"master_boc_id\": <id>} so measure fields can be edited.
     """
     resolved_user_id = _resolve_stage_inspection_user_id(db, user_id)
+    norm_ipid = _normalized_ipid(ipid, op_no)
+    if quantity_no > 1 and not _is_ftp_approved(db, sale_order_id, norm_ipid):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="FTP approval is required before measuring quantity 2 or above.",
+        )
 
     masters = (
         db.query(MasterBoc)
@@ -281,14 +401,16 @@ def ensure_stage_inspection_rows(
         )
         .all()
     )
-    by_master: dict[int, StageInspection] = {}
+    by_master_qty: dict[tuple[int, int], StageInspection] = {}
     for row in existing:
         mid = _master_boc_id_from_stage_bbox(row.bbox)
         if mid is not None:
-            by_master[mid] = row
+            row_q = row.quantity_no if row.quantity_no is not None else 1
+            by_master_qty[(mid, int(row_q))] = row
 
     for m in masters:
-        if m.id in by_master:
+        key = (m.id, int(quantity_no))
+        if key in by_master_qty:
             continue
         bbox = json.dumps({"master_boc_id": m.id})
         inst = (m.measured_instrument or "").strip() or "default"
@@ -313,7 +435,7 @@ def ensure_stage_inspection_rows(
             is_done=False,
         )
         db.add(new_row)
-        by_master[m.id] = new_row
+        by_master_qty[key] = new_row
 
     db.commit()
     return (
@@ -343,6 +465,16 @@ def patch_stage_inspection(
     row = db.query(StageInspection).filter(StageInspection.id == row_id).first()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stage inspection row not found")
+    row_q = row.quantity_no if row.quantity_no is not None else 1
+    if row_q > 1:
+        mid = _master_boc_id_from_stage_bbox(row.bbox)
+        master = db.query(MasterBoc).filter(MasterBoc.id == mid).first() if mid is not None else None
+        norm_ipid = _normalized_ipid(master.ipid if master else None, row.op_no)
+        if not _is_ftp_approved(db, row.sale_order_id, norm_ipid):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="FTP approval is required before measuring quantity 2 or above.",
+            )
     data = body.model_dump(exclude_unset=True)
     for k, v in data.items():
         setattr(row, k, v)

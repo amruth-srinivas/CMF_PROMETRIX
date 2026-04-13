@@ -100,6 +100,7 @@ class InspectionPlanStatus(Base):
     sales_order_id = Column(Integer, nullable=False)
     op_no = Column(Integer, nullable=False)
     status = Column(String(32), nullable=False, server_default=text("'draft'"))
+    confirmed_by_username = Column(String(255), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

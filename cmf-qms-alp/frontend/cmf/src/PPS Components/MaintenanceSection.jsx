@@ -113,7 +113,7 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
     setPreviewModalVisible(true);
     setPreviewLoading(true);
     try {
-      const response = await fetch(`http://172.18.100.76:8000/machine-documents/machines/${record.machine_id}/documents`);
+      const response = await fetch(`http://172.18.7.89:8000/machine-documents/machines/${record.machine_id}/documents`);
       if (response.ok) {
         const data = await response.json();
         setMachineDocuments(data);
@@ -151,7 +151,7 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
     formData.append("document_type", "maintenance");
     setUploading(true);
     try {
-      const response = await fetch(`http://172.18.100.76:8000/machine-documents/upload`, {
+      const response = await fetch(`http://172.18.7.89:8000/machine-documents/upload`, {
         method: 'POST',
         body: formData,
       });
@@ -179,7 +179,7 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
       cancelText: 'No',
       onOk: async () => {
         try {
-          const response = await fetch(`http://172.18.100.76:8000/machine-documents/documents/${documentId}`, {
+          const response = await fetch(`http://172.18.7.89:8000/machine-documents/documents/${documentId}`, {
             method: 'DELETE',
           });
           if (response.ok) {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Layout, Button, Modal, Table, Spin, Drawer, message, Select } from 'antd';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
-import { MenuOutlined, AppstoreOutlined, ShoppingCartOutlined, ClusterOutlined, ToolOutlined, InfoCircleOutlined, EyeOutlined, BuildOutlined, CheckCircleOutlined, CloudDownloadOutlined } from "@ant-design/icons";
+import { MenuOutlined, AppstoreOutlined, ShoppingCartOutlined, ClusterOutlined, ToolOutlined, InfoCircleOutlined, EyeOutlined, BuildOutlined, CheckCircleOutlined, CloudDownloadOutlined, EditOutlined } from "@ant-design/icons";
 import QualityManagementBOM from './QualityManagementBOM';
 import { Card, Tag, Typography, Empty, Space } from 'antd';
 import axios from 'axios';
@@ -9,6 +9,20 @@ import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
 
 const { Sider, Content } = Layout;
 const { Text, Title } = Typography;
+
+/** Matches new "Balloon document" uploads and legacy BALOON / typo baloon. */
+function isBalloonOperationDocument(d) {
+  if (!d) return false;
+  const t = String(d.document_type || '').trim().toLowerCase();
+  return t === 'baloon' || t === 'balloon' || t.includes('balloon');
+}
+
+/** PDF iframes in preview/review: hide toolbar and left thumbnail/outline pane (Adobe-style open params). */
+function pdfEmbedSrcForReview(url) {
+  if (!url) return '';
+  const base = url.split('#')[0];
+  return `${base}#toolbar=0&navpanes=0&pagemode=none`;
+}
 
 const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
   const navigate = useNavigate();
@@ -19,6 +33,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
   const qmsInspectorBase = location.pathname.startsWith('/supervisor')
     ? '/supervisor/qms-inspector'
     : '/admin/qms-inspector';
+  const isSupervisorView = location.pathname.startsWith('/supervisor');
   const effectiveOrderId =
     initialOrderId && String(initialOrderId) !== 'null' && String(initialOrderId) !== ''
       ? initialOrderId
@@ -46,12 +61,22 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
   const [isCheckingStatus, setIsCheckingStatus] = useState(() => !!effectiveOrderId);
   /** op_no (int) -> 'draft' | 'confirmed' from quality.inspection_plan_status */
   const [inspectionPlanByOp, setInspectionPlanByOp] = useState({});
+  /** op_no -> username who confirmed (when status is confirmed) */
+  const [inspectionPlanConfirmedByOp, setInspectionPlanConfirmedByOp] = useState({});
+  /** op_no -> ftp_status row status (pending/approved/rejected/null) */
+  const [ftpStatusByOp, setFtpStatusByOp] = useState({});
   const [planViewOpen, setPlanViewOpen] = useState(false);
   const [planViewLoading, setPlanViewLoading] = useState(false);
   const [planDrawingUrl, setPlanDrawingUrl] = useState(null);
+  const [planDrawingIsPdf, setPlanDrawingIsPdf] = useState(true);
+  const [planDrawingFileName, setPlanDrawingFileName] = useState(null);
   const [planTableRows, setPlanTableRows] = useState([]);
   const [planViewTitle, setPlanViewTitle] = useState('');
   const [planViewMeta, setPlanViewMeta] = useState(null);
+  /** Confirmed plan with no stage measurements yet — show Edit to open QMS Inspector for BOC changes. */
+  const [planViewCanEditBoc, setPlanViewCanEditBoc] = useState(false);
+  const [planViewOperationRecord, setPlanViewOperationRecord] = useState(null);
+  const [planBalloonDocumentId, setPlanBalloonDocumentId] = useState(null);
   const [measureModalOpen, setMeasureModalOpen] = useState(false);
   const [measureModalLoading, setMeasureModalLoading] = useState(false);
   const [measureRows, setMeasureRows] = useState([]);
@@ -88,6 +113,8 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
       setOperations([]);
       setPartDocuments([]);
       setInspectionPlanByOp({});
+      setInspectionPlanConfirmedByOp({});
+      setFtpStatusByOp({});
       setPreviewUrl(null);
       setPreviewModalVisible(false);
     }
@@ -96,6 +123,12 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
   const parseOpNo = (record) => {
     const n = Number(String(record?.operation_number ?? '').trim());
     return Number.isFinite(n) ? n : 10;
+  };
+
+  const buildFtpIpid = (partNo, opNo) => {
+    const pn = (partNo || 'PART').toString().trim().replace(/[^A-Za-z0-9_-]+/g, '_');
+    const op = Number.isFinite(Number(opNo)) ? Number(opNo) : 'NA';
+    return `FTP_${pn}_OP_${op}`;
   };
 
   const fetchDetails = async (item) => {
@@ -119,15 +152,42 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
             params: { part_number: pn, sales_order_id: oid },
           });
           const map = {};
+          const byMap = {};
           (Array.isArray(ps.data) ? ps.data : []).forEach((r) => {
-            if (r && r.op_no != null) map[r.op_no] = r.status;
+            if (r && r.op_no != null) {
+              map[r.op_no] = r.status;
+              byMap[r.op_no] = r.confirmed_by_username || null;
+            }
           });
           setInspectionPlanByOp(map);
+          setInspectionPlanConfirmedByOp(byMap);
         } catch {
           setInspectionPlanByOp({});
+          setInspectionPlanConfirmedByOp({});
+        }
+        try {
+          const ftpPairs = await Promise.all(
+            ops.map(async (op) => {
+              const opNo = parseOpNo(op);
+              const ipid = buildFtpIpid(pn, opNo);
+              try {
+                const r = await axios.get(`${QUALITY_API_BASE_URL}/quality/ftp-status`, {
+                  params: { order_id: oid, ipid, op_no: opNo },
+                });
+                return [opNo, r.data?.status || null];
+              } catch {
+                return [opNo, null];
+              }
+            }),
+          );
+          setFtpStatusByOp(Object.fromEntries(ftpPairs));
+        } catch {
+          setFtpStatusByOp({});
         }
       } else {
         setInspectionPlanByOp({});
+        setInspectionPlanConfirmedByOp({});
+        setFtpStatusByOp({});
       }
       
       // Auto-set the first part 2D drawing as default preview
@@ -146,15 +206,21 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
   const getDrawingInfo = (op) => {
     const isDrawing = (d) => {
       if (!d) return false;
+      if (isBalloonOperationDocument(d)) return false;
       const type = (d.document_type || "").toLowerCase();
       const name = (d.document_name || "").toLowerCase();
       const isPdfFile = name.toLowerCase().endsWith('.pdf') || type.includes('pdf');
       return type.includes('2d') || type.includes('drawing') || name.includes('drawing') || isPdfFile || name.includes('.png') || name.includes('.jpg') || name.includes('.jpeg');
     };
 
-    const partDrawing = partDocuments.find(isDrawing);
-    const opDrawing = op.operation_documents?.find(isDrawing);
-    const previewDrawing = opDrawing || partDrawing || op.operation_documents?.[0] || partDocuments[0];
+    const nonBalloonOpDocs = (op.operation_documents || []).filter((d) => !isBalloonOperationDocument(d));
+    const nonBalloonPartDocs = partDocuments.filter((d) => !isBalloonOperationDocument(d));
+    const partDrawing = nonBalloonPartDocs.find(isDrawing);
+    const opDrawing = nonBalloonOpDocs.find(isDrawing);
+    const previewDrawing =
+      opDrawing || partDrawing ||
+      nonBalloonOpDocs[0] || nonBalloonPartDocs[0] ||
+      (op.operation_documents || [])[0] || partDocuments[0];
 
     if (!previewDrawing) return { url: null, isPdf: false, name: '', apiDocumentId: null };
 
@@ -182,9 +248,17 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
     setPreviewModalVisible(true);
   };
 
+  const closePlanViewModal = () => {
+    setPlanViewOpen(false);
+    setPlanViewCanEditBoc(false);
+    setPlanViewOperationRecord(null);
+    setPlanBalloonDocumentId(null);
+  };
+
   const openConfirmedPlanModal = async (record, opNo) => {
     const oid = effectiveOrderId && String(effectiveOrderId) !== 'null' ? Number(effectiveOrderId) : null;
     const partNo = selectedItem?.part_number;
+    const partPk = selectedItem?.id;
     if (!oid || !partNo) {
       message.error('Order and part are required to view the confirmed plan.');
       return;
@@ -195,9 +269,15 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
       opName: record.operation_name,
       partNo: selectedItem?.part_number || '',
       orderNo: effectiveOrderId ? String(effectiveOrderId) : '',
+      operationId: record.id,
     });
+    setPlanViewOperationRecord(record);
+    setPlanViewCanEditBoc(false);
+    setPlanBalloonDocumentId(null);
     setPlanViewOpen(true);
     setPlanViewLoading(true);
+    setPlanDrawingFileName(null);
+    setPlanDrawingIsPdf(true);
     try {
       const [docsRes, bocRes] = await Promise.all([
         axios.get(`${QUALITY_API_BASE_URL}/operation-documents/operation/${record.id}`),
@@ -207,28 +287,107 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
       ]);
       const docs = Array.isArray(docsRes.data) ? docsRes.data : [];
       const baloonDoc = docs
-        .filter((d) => String(d?.document_type || '').trim().toUpperCase() === 'BALOON')
+        .filter(isBalloonOperationDocument)
         .sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0))[0];
+      const name = baloonDoc?.document_name || '';
+      const isPdf = /\.pdf$/i.test(name);
+      setPlanDrawingIsPdf(isPdf);
+      setPlanDrawingFileName(name || null);
       setPlanDrawingUrl(baloonDoc ? `${QUALITY_API_BASE_URL}/operation-documents/${baloonDoc.id}/preview` : null);
+      setPlanBalloonDocumentId(baloonDoc?.id ?? null);
       setPlanTableRows(Array.isArray(bocRes.data) ? bocRes.data : []);
+
+      let canEditBoc = false;
+      if (partPk) {
+        try {
+          const sumRes = await axios.get(`${QUALITY_API_BASE_URL}/quality/stage-inspection/measurement-summary`, {
+            params: { part_id: partPk, sale_order_id: oid, op_no: opNo },
+          });
+          canEditBoc = !sumRes.data?.any_recorded;
+        } catch {
+          canEditBoc = false;
+        }
+      }
+      setPlanViewCanEditBoc(canEditBoc);
     } catch (err) {
       console.error(err);
       const detail = err.response?.data?.detail;
       message.error(typeof detail === 'string' ? detail : err.message || 'Failed to load confirmed plan');
       setPlanDrawingUrl(null);
+      setPlanDrawingFileName(null);
+      setPlanDrawingIsPdf(true);
       setPlanTableRows([]);
+      setPlanViewCanEditBoc(false);
+      setPlanBalloonDocumentId(null);
     } finally {
       setPlanViewLoading(false);
     }
   };
 
+  const handleEditPlanFromViewModal = async () => {
+    const record = planViewOperationRecord;
+    if (!record || !selectedItem || !effectiveOrderId || String(effectiveOrderId) === 'null') {
+      message.error('Missing context to open the inspector.');
+      return;
+    }
+    const opNo = parseOpNo(record);
+    const oid = Number(effectiveOrderId);
+    try {
+      await axios.put(`${QUALITY_API_BASE_URL}/quality/inspection-plan-status`, {
+        part_number: selectedItem.part_number,
+        sales_order_id: oid,
+        op_no: opNo,
+        status: 'draft',
+      });
+      setInspectionPlanByOp((prev) => ({ ...prev, [opNo]: 'draft' }));
+      setInspectionPlanConfirmedByOp((prev) => ({ ...prev, [opNo]: null }));
+    } catch (err) {
+      console.error(err);
+      const detail = err.response?.data?.detail;
+      message.error(typeof detail === 'string' ? detail : err.message || 'Could not reopen the plan for editing');
+      return;
+    }
+
+    const hierarchy = productHierarchies[selectedItem.productId];
+    const projectName = hierarchy?.product?.product_name || '';
+    const partName = selectedItem.part_name || '';
+    const opParts = [];
+    if (record.operation_number != null && record.operation_number !== '') opParts.push(String(record.operation_number));
+    if (record.operation_name) opParts.push(record.operation_name);
+    const opLabel = opParts.join(': ');
+    const fallback = getDrawingInfo(record);
+    const finalUrl = planDrawingUrl || fallback.url || '';
+    const finalIsPdf = planDrawingUrl ? planDrawingIsPdf : fallback.isPdf;
+    const finalName = planDrawingFileName || fallback.name || '';
+    const finalDocId = planBalloonDocumentId != null ? planBalloonDocumentId : fallback.apiDocumentId;
+
+    const qs = new URLSearchParams({
+      drawingUrl: finalUrl || '',
+      isPdf: String(!!finalIsPdf),
+      fileName: finalName || '',
+      projectName,
+      partName,
+      operationName: opLabel,
+      partId: String(selectedItem.id),
+      partNumber: selectedItem.part_number || '',
+      operationNumber: String(record.operation_number ?? ''),
+      operationId: String(record.id),
+      orderId: String(effectiveOrderId),
+    });
+    if (finalDocId != null) qs.set('documentId', String(finalDocId));
+    closePlanViewModal();
+    navigate(`${qmsInspectorBase}?${qs.toString()}`);
+  };
+
   const handleDownloadPlanDrawing = () => {
     if (!planDrawingUrl) return;
+    const id = planDrawingUrl.match(/operation-documents\/(\d+)\//)?.[1];
+    if (!id) return;
     const a = document.createElement('a');
-    a.href = planDrawingUrl;
+    a.href = `${QUALITY_API_BASE_URL}/operation-documents/${id}/download`;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
-    a.download = `operation_${planViewMeta?.opNo || 'plan'}_balloon`;
+    a.download = planDrawingFileName || `operation_${planViewMeta?.opNo || 'plan'}_balloon.pdf`;
     a.click();
   };
 
@@ -349,7 +508,16 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
     };
   }, [measureModalOpen, measureContext, measureQty]);
 
-  const isGdtType = (value) => String(value || '').trim().toUpperCase().startsWith('GDT');
+  /** Ant Design Tag `color` for dimension_type — Length (blue) vs Diameter (orange) vs GDT (purple). */
+  const dimensionTypeTagColor = (value) => {
+    const s = String(value || '').trim();
+    if (!s) return 'default';
+    const u = s.toUpperCase();
+    if (u.startsWith('GDT') || u.includes('GD&T')) return 'purple';
+    if (u.includes('DIAMETER') || u.includes('∅') || u.includes('⌀') || /\bDIA\b/i.test(s)) return 'orange';
+    if (u.includes('LENGTH') || /^length$/i.test(s)) return 'blue';
+    return 'cyan';
+  };
   const fmtTol = (value) => {
     const n = Number(value);
     if (!Number.isFinite(n)) return '0';
@@ -601,6 +769,24 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                         },
                       },
                       {
+                        title: 'Confirmed by',
+                        key: 'inspection_plan_confirmed_by',
+                        width: 140,
+                        render: (_, record) => {
+                          const opNo = parseOpNo(record);
+                          const st = inspectionPlanByOp[opNo];
+                          const who = inspectionPlanConfirmedByOp[opNo];
+                          if (st !== 'confirmed' || !who) {
+                            return <Text type="secondary">—</Text>;
+                          }
+                          return (
+                            <Text style={{ fontSize: 13 }} ellipsis={{ tooltip: who }}>
+                              {who}
+                            </Text>
+                          );
+                        },
+                      },
+                      {
                         title: 'Req qty',
                         dataIndex: 'required_quantity',
                         key: 'required_quantity',
@@ -642,6 +828,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                         render: (_, record) => {
                           const opNo = parseOpNo(record);
                           const st = inspectionPlanByOp[opNo];
+                          const ftpStatus = ftpStatusByOp[opNo] || null;
                           const planLabel = st === 'confirmed' ? 'View Plan' : st === 'draft' ? 'Continue Plan' : 'Create Plan';
                           const PlanIcon = st === 'confirmed' ? EyeOutlined : BuildOutlined;
                           return (
@@ -674,6 +861,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                                         status: 'draft',
                                       });
                                       setInspectionPlanByOp((prev) => ({ ...prev, [opNo]: 'draft' }));
+                                      setInspectionPlanConfirmedByOp((prev) => ({ ...prev, [opNo]: null }));
                                     } catch (err) {
                                       console.error(err);
                                       const detail = err.response?.data?.detail;
@@ -711,6 +899,36 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                             >
                               Measurements
                             </Button>
+                            {isSupervisorView && ftpStatus === 'pending' && (
+                              <Button
+                                size="small"
+                                type="primary"
+                                onClick={async () => {
+                                  const oid = effectiveOrderId && String(effectiveOrderId) !== 'null' ? Number(effectiveOrderId) : null;
+                                  const partNo = selectedItem?.part_number;
+                                  if (!oid || !partNo) {
+                                    message.error('Missing order/part for FTP approval.');
+                                    return;
+                                  }
+                                  try {
+                                    await axios.put(`${QUALITY_API_BASE_URL}/quality/ftp-status`, {
+                                      order_id: oid,
+                                      ipid: buildFtpIpid(partNo, opNo),
+                                      status: 'approved',
+                                      is_completed: true,
+                                    });
+                                    setFtpStatusByOp((prev) => ({ ...prev, [opNo]: 'approved' }));
+                                    message.success(`FTP approved for operation ${opNo}.`);
+                                  } catch (err) {
+                                    console.error(err);
+                                    const detail = err.response?.data?.detail;
+                                    message.error(typeof detail === 'string' ? detail : err.message || 'Failed to approve FTP');
+                                  }
+                                }}
+                              >
+                                Approve FTP
+                              </Button>
+                            )}
                             <Button 
                               size="small" 
                               icon={<EyeOutlined />} 
@@ -733,19 +951,26 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                 centered
                 footer={null}
                 width="95%"
-                onCancel={() => setPlanViewOpen(false)}
+                onCancel={closePlanViewModal}
                 open={planViewOpen}
                 styles={{ body: { padding: 12, height: '80vh', background: '#f7f8fa' } }}
               >
                 <div style={{ display: 'grid', gridTemplateColumns: '1.45fr 1fr', gap: 14, height: '100%', fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace' }}>
                   <div style={{ border: '1px solid #dfe4ea', borderRadius: 10, overflow: 'hidden', background: '#fff', display: 'flex', flexDirection: 'column', boxShadow: '0 2px 10px rgba(15,23,42,0.04)' }}>
-                    <div style={{ padding: '14px 16px', borderBottom: '1px solid #eef0f3', background: '#fafbfc' }}>
+                    <div style={{ padding: '14px 16px', borderBottom: '1px solid #eef0f3', background: '#fafbfc', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
                       <Text strong style={{ color: '#111827', fontSize: 22, lineHeight: 1.2, fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace' }}>Inspection Details</Text>
                       <div style={{ marginTop: 10, fontSize: 16, color: '#374151' }}>
                         <Text style={{ fontSize: 16, fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace' }}><b>Order:</b> {planViewMeta?.orderNo || '—'}</Text>
                         <Text style={{ fontSize: 16, marginLeft: 18, fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace' }}><b>Part:</b> {planViewMeta?.partNo || '—'}</Text>
                         <Text style={{ fontSize: 16, marginLeft: 18, fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace' }}><b>Operation:</b> {planViewMeta?.opNo || '—'}</Text>
                       </div>
+                      </div>
+                      {planViewCanEditBoc && !planViewLoading && (
+                        <Button type="primary" icon={<EditOutlined />} onClick={handleEditPlanFromViewModal} style={{ flexShrink: 0 }}>
+                          Edit plan (BOC)
+                        </Button>
+                      )}
                     </div>
                     <div style={{ padding: '0 10px 10px', flex: 1, minHeight: 0 }}>
                       <Table
@@ -764,17 +989,14 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                             dataIndex: 'dimension_type',
                             key: 'dimension_type',
                             width: 280,
-                            render: (val) => {
-                              const gdt = isGdtType(val);
-                              return (
-                                <Tag
-                                  color={gdt ? 'purple' : 'cyan'}
-                                  style={{ margin: 0, borderRadius: 10, fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace' }}
-                                >
-                                  {val || '—'}
-                                </Tag>
-                              );
-                            },
+                            render: (val) => (
+                              <Tag
+                                color={dimensionTypeTagColor(val)}
+                                style={{ margin: 0, borderRadius: 10, fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace' }}
+                              >
+                                {val || '—'}
+                              </Tag>
+                            ),
                           },
                           { title: 'Nominal', dataIndex: 'nominal', key: 'nominal', width: 130, render: (v) => <Text style={{ fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace', color: '#1f2937', fontSize: 13 }}>{v ?? '—'}</Text> },
                           { title: 'Upper Tol', dataIndex: 'uppertol', key: 'uppertol', width: 130, render: (v) => <Text style={{ fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace', color: Number(v) > 0 ? '#15803d' : '#6b7280', fontSize: 13 }}>{fmtTol(v)}</Text> },
@@ -794,22 +1016,38 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                       {planViewLoading ? (
                         <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin /></div>
                       ) : planDrawingUrl ? (
-                        <img
-                          src={planDrawingUrl}
-                          alt="Ballooned drawing"
-                          style={{
-                            maxWidth: '100%',
-                            maxHeight: '100%',
-                            objectFit: 'contain',
-                            border: '1px solid #e5e7eb',
-                            borderRadius: 10,
-                            background: '#fff',
-                            boxShadow: '0 2px 10px rgba(15,23,42,0.08)',
-                          }}
-                        />
+                        planDrawingIsPdf ? (
+                          <iframe
+                            title="Balloon document"
+                            src={pdfEmbedSrcForReview(planDrawingUrl)}
+                            style={{
+                              width: '100%',
+                              minHeight: 480,
+                              height: 'min(72vh, 900px)',
+                              border: '1px solid #e5e7eb',
+                              borderRadius: 10,
+                              background: '#fff',
+                              boxShadow: '0 2px 10px rgba(15,23,42,0.08)',
+                            }}
+                          />
+                        ) : (
+                          <img
+                            src={planDrawingUrl}
+                            alt="Ballooned drawing"
+                            style={{
+                              maxWidth: '100%',
+                              maxHeight: '100%',
+                              objectFit: 'contain',
+                              border: '1px solid #e5e7eb',
+                              borderRadius: 10,
+                              background: '#fff',
+                              boxShadow: '0 2px 10px rgba(15,23,42,0.08)',
+                            }}
+                          />
+                        )
                       ) : (
                         <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <Empty description="No BALOON drawing found for this operation" />
+                          <Empty description="No balloon document found for this operation" />
                         </div>
                       )}
                     </div>
@@ -868,10 +1106,11 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                           dataIndex: 'dimension_type',
                           key: 'dimension_type',
                           width: 170,
-                          render: (v) => {
-                            const gdt = String(v || '').trim().toUpperCase().startsWith('GDT');
-                            return <Tag color={gdt ? 'purple' : 'cyan'} style={{ margin: 0, borderRadius: 10 }}>{v || '—'}</Tag>;
-                          },
+                          render: (v) => (
+                            <Tag color={dimensionTypeTagColor(v)} style={{ margin: 0, borderRadius: 10 }}>
+                              {v || '—'}
+                            </Tag>
+                          ),
                         },
                         { title: 'Nominal', dataIndex: 'nominal_value', key: 'nominal_value', width: 110, render: (v) => <Text strong>{v ?? '—'}</Text> },
                         { title: 'Upper', dataIndex: 'uppertol', key: 'uppertol', width: 90, render: (v) => <Text style={{ color: Number(v) > 0 ? '#15803d' : '#6b7280' }}>{fmtTol(v)}</Text> },
@@ -933,7 +1172,7 @@ const QualityManagement = ({ initialProductId, initialOrderId, fromOms }) => {
                   {previewUrl ? (
                     previewIsPdf ? (
                       <iframe 
-                        src={`${previewUrl}#toolbar=0`} 
+                        src={pdfEmbedSrcForReview(previewUrl)} 
                         width="100%" 
                         height="100%" 
                         style={{ border: 'none' }}

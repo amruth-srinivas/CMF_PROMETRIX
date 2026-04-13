@@ -12,7 +12,8 @@ const AppLayout = ({ children }) => {
   const isLoginPage = location.pathname === '/login';
   const isInspectorPage =
     location.pathname === '/admin/qms-inspector' ||
-    location.pathname === '/supervisor/qms-inspector';
+    location.pathname === '/supervisor/qms-inspector' ||
+    location.pathname === '/operator/qms-inspector';
   const [collapsed, setCollapsed] = useState(false);
 
   if (isLoginPage || isInspectorPage) {

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { App, Alert, Modal, Tabs } from 'antd';
-import { useSearchParams } from 'react-router-dom';
+import { App, Alert, Button, Modal, Space, Tabs, Tag } from 'antd';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
 import InspectorHeader from './InspectorComponents/InspectorHeader';
@@ -47,7 +47,9 @@ import { DEFAULT_MEASURED_INSTRUMENT } from './InspectorComponents/inspectorCons
 
 const QMSInspector = () => {
   const { message } = App.useApp();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
+  const isOperatorView = location.pathname.startsWith('/operator/');
 
   const drawingUrl = searchParams.get('drawingUrl');
   const documentId = searchParams.get('documentId');
@@ -60,6 +62,7 @@ const QMSInspector = () => {
   const projectName = searchParams.get('projectName') || '';
   const partName = searchParams.get('partName') || '';
   const operationName = searchParams.get('operationName') || '';
+  const fileIsPdf = searchParams.get('isPdf') !== 'false';
 
   const fileUrl = drawingUrl || (documentId ? `${QUALITY_API_BASE_URL}/documents/${documentId}/preview` : null);
 
@@ -91,18 +94,36 @@ const QMSInspector = () => {
   const [viewerWidth, setViewerWidth] = useState(880);
   const [viewerHeight, setViewerHeight] = useState(600);
 
-  const ipid = 'AUTO';
   const [salesOrderId, setSalesOrderId] = useState(orderId && !Number.isNaN(Number(orderId)) ? Number(orderId) : undefined);
   const [opNo] = useState(() => {
     if (opNumber == null || opNumber === '') return 10;
     const n = Number(opNumber);
     return Number.isNaN(n) ? 10 : n;
   });
+  const ipid = useMemo(() => {
+    const pn = (partNumber || 'PART').toString().trim().replace(/[^A-Za-z0-9_-]+/g, '_');
+    const op = Number.isFinite(Number(opNo)) ? Number(opNo) : 'NA';
+    return `FTP_${pn}_OP_${op}`;
+  }, [partNumber, opNo]);
   const [saving, setSaving] = useState(false);
   /** null = unknown / no row; draft | confirmed from quality.inspection_plan_status */
   const [planStatus, setPlanStatus] = useState(null);
-  const [inspectorMode, setInspectorMode] = useState('PLAN');
+  const [confirmedByUsername, setConfirmedByUsername] = useState(null);
+  const initialInspectorMode = (() => {
+    if (isOperatorView) return 'MEASURE';
+    const m = (searchParams.get('mode') || '').trim().toUpperCase();
+    return m === 'MEASURE' ? 'MEASURE' : 'PLAN';
+  })();
+  const [inspectorMode, setInspectorMode] = useState(initialInspectorMode);
+  useEffect(() => {
+    if (isOperatorView && inspectorMode !== 'MEASURE') {
+      setInspectorMode('MEASURE');
+    }
+  }, [isOperatorView, inspectorMode]);
+
   const [stageRows, setStageRows] = useState([]);
+  const [ftpStatus, setFtpStatus] = useState(null);
+  const ftpApproved = ftpStatus === 'approved';
   const [activeTab, setActiveTab] = useState('characteristics');
   const [notes, setNotes] = useState([]);
   const [notesLoading, setNotesLoading] = useState(false);
@@ -187,6 +208,7 @@ const QMSInspector = () => {
     const oid = Number(salesOrderId);
     if (!partNumber || !oid) {
       setPlanStatus(null);
+      setConfirmedByUsername(null);
       return;
     }
     let cancelled = false;
@@ -196,9 +218,15 @@ const QMSInspector = () => {
           params: { part_number: partNumber, sales_order_id: oid, op_no: opNo },
         });
         const row = Array.isArray(res.data) && res.data[0];
-        if (!cancelled) setPlanStatus(row?.status || null);
+        if (!cancelled) {
+          setPlanStatus(row?.status || null);
+          setConfirmedByUsername(row?.confirmed_by_username || null);
+        }
       } catch {
-        if (!cancelled) setPlanStatus(null);
+        if (!cancelled) {
+          setPlanStatus(null);
+          setConfirmedByUsername(null);
+        }
       }
     })();
     return () => {
@@ -206,7 +234,56 @@ const QMSInspector = () => {
     };
   }, [partNumber, salesOrderId, opNo]);
 
-  const planLocked = planStatus === 'confirmed';
+  const [hasStageMeasurements, setHasStageMeasurements] = useState(false);
+  const refreshMeasurementSummary = useCallback(async () => {
+    const pid = partId ? Number(partId) : null;
+    const oid = Number(salesOrderId);
+    if (!pid || !oid || Number.isNaN(oid) || !partNumber) {
+      setHasStageMeasurements(false);
+      return;
+    }
+    try {
+      const res = await axios.get(`${QUALITY_API_BASE_URL}/quality/stage-inspection/measurement-summary`, {
+        params: { part_id: pid, sale_order_id: oid, op_no: opNo },
+      });
+      setHasStageMeasurements(Boolean(res.data?.any_recorded));
+    } catch {
+      setHasStageMeasurements(false);
+    }
+  }, [partId, salesOrderId, opNo, partNumber]);
+
+  useEffect(() => {
+    void refreshMeasurementSummary();
+  }, [refreshMeasurementSummary]);
+
+  const refreshFtpStatus = useCallback(async () => {
+    const oid = Number(salesOrderId);
+    if (!oid || Number.isNaN(oid) || !ipid) {
+      setFtpStatus(null);
+      return;
+    }
+    try {
+      const res = await axios.get(`${QUALITY_API_BASE_URL}/quality/ftp-status`, {
+        params: { order_id: oid, ipid, op_no: opNo },
+      });
+      setFtpStatus(res.data?.status || null);
+    } catch {
+      setFtpStatus(null);
+    }
+  }, [salesOrderId, ipid, opNo]);
+
+  useEffect(() => {
+    void refreshFtpStatus();
+  }, [refreshFtpStatus]);
+
+  useEffect(() => {
+    if (!ftpApproved && quantityNo > 1) {
+      setQuantityNo(1);
+    }
+  }, [ftpApproved, quantityNo]);
+
+  /** Block BOC edits only when the plan is confirmed and at least one measurement exists. */
+  const bocEditLocked = planStatus === 'confirmed' && hasStageMeasurements;
 
   const loadNotes = useCallback(async () => {
     const pid = partId ? Number(partId) : null;
@@ -240,6 +317,7 @@ const QMSInspector = () => {
 
   useEffect(() => {
     if (inspectorMode !== 'MEASURE') return;
+    if (quantityNo > 1 && !ftpApproved) return;
     const pid = partId ? Number(partId) : null;
     const oid = Number(salesOrderId);
     if (!pid || !oid || !partNumber) return;
@@ -253,6 +331,7 @@ const QMSInspector = () => {
             sale_order_id: oid,
             op_no: opNo,
             quantity_no: quantityNo,
+            ipid,
             user_id: 1,
           },
         });
@@ -268,7 +347,7 @@ const QMSInspector = () => {
     return () => {
       cancelled = true;
     };
-  }, [inspectorMode, partId, salesOrderId, opNo, partNumber, bocRowsRaw.length, quantityNo, message]);
+  }, [inspectorMode, partId, salesOrderId, opNo, partNumber, bocRowsRaw.length, quantityNo, message, ftpApproved, ipid]);
 
   const handleMeasurePatch = useCallback(
     async (stageId, payload) => {
@@ -276,13 +355,14 @@ const QMSInspector = () => {
       try {
         await axios.patch(`${QUALITY_API_BASE_URL}/quality/stage-inspection/${stageId}`, payload);
         setStageRows((prev) => prev.map((r) => (r.id === stageId ? { ...r, ...payload } : r)));
+        await refreshMeasurementSummary();
       } catch (err) {
         console.error(err);
         const detail = err.response?.data?.detail;
         message.error(typeof detail === 'string' ? detail : err.message || 'Failed to save measurement');
       }
     },
-    [message],
+    [message, refreshMeasurementSummary],
   );
 
   const bocFiltered = useMemo(() => {
@@ -322,6 +402,37 @@ const QMSInspector = () => {
     });
   }, [bocDisplay, stageByMasterId]);
 
+  const firstQtyAllDone = useMemo(() => {
+    if (quantityNo !== 1 || !bocTableData.length) return false;
+    return bocTableData.every((r) => Boolean(r.stageInspectionId) && Boolean(r.measureLocked));
+  }, [quantityNo, bocTableData]);
+
+  const handleRequestFtpApproval = useCallback(async () => {
+    const oid = Number(salesOrderId);
+    if (!oid || Number.isNaN(oid)) {
+      message.error('Order is required for FTP approval.');
+      return;
+    }
+    if (!firstQtyAllDone) {
+      message.warning('Complete quantity 1 measurements before requesting FTP approval.');
+      return;
+    }
+    try {
+      await axios.put(`${QUALITY_API_BASE_URL}/quality/ftp-status`, {
+        order_id: oid,
+        ipid,
+        status: 'pending',
+        is_completed: false,
+      });
+      await refreshFtpStatus();
+      message.success('FTP approval request sent to supervisor.');
+    } catch (err) {
+      console.error(err);
+      const detail = err.response?.data?.detail;
+      message.error(typeof detail === 'string' ? detail : err.message || 'Failed to request FTP approval');
+    }
+  }, [salesOrderId, firstQtyAllDone, ipid, refreshFtpStatus, message]);
+
   /** Drop selection for rows that disappeared (filters / reload). */
   useEffect(() => {
     const valid = new Set(bocTableData.map((r) => r.id));
@@ -338,7 +449,7 @@ const QMSInspector = () => {
   }, []);
 
   const handleDeleteSelectedRows = useCallback(() => {
-    if (planLocked) {
+    if (bocEditLocked) {
       message.warning('Plan is confirmed. Characteristics cannot be deleted.');
       return;
     }
@@ -364,11 +475,11 @@ const QMSInspector = () => {
         }
       },
     });
-  }, [selectedRowIds, fetchMasterBoc, message, planLocked]);
+  }, [selectedRowIds, fetchMasterBoc, message, bocEditLocked]);
 
   useEffect(() => {
     const onKey = (e) => {
-      if (planLocked) return;
+      if (bocEditLocked) return;
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
@@ -378,7 +489,7 @@ const QMSInspector = () => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedRowIds, handleDeleteSelectedRows, planLocked]);
+  }, [selectedRowIds, handleDeleteSelectedRows, bocEditLocked]);
 
   const balloonOverlays = useMemo(() => buildBalloonOverlaysFromBocRows(bocDisplay), [bocDisplay]);
 
@@ -469,7 +580,7 @@ const QMSInspector = () => {
 
   const onDetectionComplete = useCallback(
     async (data) => {
-      if (planLocked) {
+      if (bocEditLocked) {
         message.warning('Plan is confirmed. Characteristics cannot be changed.');
         return;
       }
@@ -492,24 +603,24 @@ const QMSInspector = () => {
       }
       await fetchMasterBoc();
     },
-    [planLocked, salesOrderId, partNumber, persistMasterBocDimensions, fetchMasterBoc, detectZonesForBoxes, message],
+    [bocEditLocked, salesOrderId, partNumber, persistMasterBocDimensions, fetchMasterBoc, detectZonesForBoxes, message],
   );
 
   const handleStampRegion = useCallback(
     (region) => {
-      if (planLocked) {
+      if (bocEditLocked) {
         message.warning('Plan is confirmed. Characteristics cannot be changed.');
         return;
       }
       setPendingStampRegion(region);
       setStampModalOpen(true);
     },
-    [planLocked, message],
+    [bocEditLocked, message],
   );
 
   const handleStampModalOk = useCallback(
     async (formValues) => {
-      if (planLocked) {
+      if (bocEditLocked) {
         message.warning('Plan is confirmed. Characteristics cannot be changed.');
         return;
       }
@@ -558,7 +669,7 @@ const QMSInspector = () => {
         setStampSaving(false);
       }
     },
-    [planLocked, salesOrderId, partNumber, pendingStampRegion, opNo, ipid, message, fetchMasterBoc, detectZoneForRegion],
+    [bocEditLocked, salesOrderId, partNumber, pendingStampRegion, opNo, ipid, message, fetchMasterBoc, detectZoneForRegion],
   );
 
   const handleConfirmPlan = useCallback(() => {
@@ -589,26 +700,38 @@ const QMSInspector = () => {
           }
           const blob = await exporter();
           if (!blob) {
-            throw new Error('Failed to capture ballooned drawing.');
+            throw new Error('Failed to build balloon PDF.');
           }
           const fd = new FormData();
           const safePart = (partNumber || 'part').replace(/[^a-zA-Z0-9_-]+/g, '_');
-          const fileName = `${safePart}_op${opNo}_balloon.png`;
+          const fileName = `${safePart}_op${opNo}_balloon.pdf`;
           fd.append('operation_id', String(operationPk));
-          fd.append('document_type', 'BALOON');
+          fd.append('document_type', 'Balloon document');
           fd.append('document_version', '1.0');
-          fd.append('files', new File([blob], fileName, { type: 'image/png' }));
+          fd.append('files', new File([blob], fileName, { type: 'application/pdf' }));
           await axios.post(`${QUALITY_API_BASE_URL}/operation-documents/upload/`, fd, {
             headers: { 'Content-Type': 'multipart/form-data' },
           });
 
-          await axios.put(`${QUALITY_API_BASE_URL}/quality/inspection-plan-status`, {
+          let confirmUser = '';
+          try {
+            const u = JSON.parse(localStorage.getItem('user') || '{}');
+            confirmUser = (u.user_name || u.username || '').trim();
+          } catch {
+            confirmUser = '';
+          }
+          if (!confirmUser) {
+            message.warning('Could not read your username. Confirming without a named user.');
+          }
+          const statusRes = await axios.put(`${QUALITY_API_BASE_URL}/quality/inspection-plan-status`, {
             part_number: partNumber,
             sales_order_id: oid,
             op_no: opNo,
             status: 'confirmed',
+            confirmed_by_username: confirmUser || undefined,
           });
           setPlanStatus('confirmed');
+          setConfirmedByUsername(statusRes.data?.confirmed_by_username || confirmUser || null);
           message.success('Inspection plan confirmed.');
         } catch (err) {
           console.error(err);
@@ -621,7 +744,7 @@ const QMSInspector = () => {
   }, [partNumber, salesOrderId, operationId, opNo, bocRowsRaw.length, message]);
 
   useEffect(() => {
-    if (!bocRowsRaw.length || !partId || !documentId || planLocked) return;
+    if (!bocRowsRaw.length || !partId || !documentId || bocEditLocked) return;
     let cancelled = false;
     (async () => {
       const withRects = bocRowsRaw
@@ -652,25 +775,25 @@ const QMSInspector = () => {
     return () => {
       cancelled = true;
     };
-  }, [bocRowsRaw, partId, documentId, detectZonesForBoxes, fetchMasterBoc, message, planLocked]);
+  }, [bocRowsRaw, partId, documentId, detectZonesForBoxes, fetchMasterBoc, message, bocEditLocked]);
 
   const handleToolChange = useCallback(
     (tool) => {
-      if (planLocked && (tool === 'select' || tool === 'stamp')) {
+      if (bocEditLocked && (tool === 'select' || tool === 'stamp')) {
         message.warning('Plan is confirmed. Use MEASURE mode to record results.');
         return;
       }
       setActiveTool(tool);
       if (tool === 'notes') setActiveTab('notes');
     },
-    [planLocked, message],
+    [bocEditLocked, message],
   );
 
   useEffect(() => {
-    if (planLocked && (activeTool === 'select' || activeTool === 'stamp')) {
+    if (bocEditLocked && (activeTool === 'select' || activeTool === 'stamp')) {
       setActiveTool('pan');
     }
-  }, [planLocked, activeTool]);
+  }, [bocEditLocked, activeTool]);
 
   const noteOverlays = useMemo(
     () =>
@@ -769,7 +892,7 @@ const QMSInspector = () => {
   }, [message]);
 
   const handleClearAll = useCallback(() => {
-    if (planLocked) {
+    if (bocEditLocked) {
       message.warning('Plan is confirmed. Characteristics cannot be cleared.');
       return;
     }
@@ -794,7 +917,7 @@ const QMSInspector = () => {
         }
       },
     });
-  }, [bocRowsRaw, fetchMasterBoc, message, planLocked]);
+  }, [bocRowsRaw, fetchMasterBoc, message, bocEditLocked]);
 
   const canDetect = Boolean(documentId && partId);
 
@@ -806,10 +929,13 @@ const QMSInspector = () => {
         partName={partName}
         operationName={operationName}
         mode={inspectorMode}
-        onModeChange={setInspectorMode}
+        onModeChange={isOperatorView ? undefined : setInspectorMode}
         planStatus={planStatus}
-        onConfirmPlan={handleConfirmPlan}
+        confirmedByUsername={confirmedByUsername}
+        onConfirmPlan={isOperatorView ? undefined : handleConfirmPlan}
         confirmPlanDisabled={!bocRowsRaw.length || !salesOrderId || !partNumber}
+        measureOnly={isOperatorView}
+        hideTopActions={isOperatorView}
       />
 
       {/* Plain divs — Ant Sider's internal wrapper breaks flex height chains */}
@@ -824,7 +950,8 @@ const QMSInspector = () => {
           onAutoBalloon={handleAutoBalloon}
           onClearAll={handleClearAll}
           clearAllDisabled={!bocRowsRaw.length}
-          planEditLocked={planLocked}
+          planEditLocked={bocEditLocked}
+          operatorRestricted={isOperatorView}
         />
 
         {/* PDF viewer */}
@@ -855,6 +982,7 @@ const QMSInspector = () => {
             <div ref={viewerWrapRef} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
               <PdfInspectionPlanCanvas
                 fileUrl={fileUrl}
+                isPdf={fileIsPdf}
                 documentId={canDetect ? Number(documentId) : null}
                 partId={partId ? Number(partId) : null}
                 activeTool={activeTool}
@@ -893,6 +1021,26 @@ const QMSInspector = () => {
             fontFamily: '"JetBrains Mono", "Consolas", "Courier New", monospace',
           }}
         >
+          {inspectorMode === 'MEASURE' && (
+            <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <Space>
+                <Tag color={ftpApproved ? 'success' : ftpStatus === 'pending' ? 'processing' : 'default'}>
+                  FTP: {ftpStatus ? ftpStatus.toUpperCase() : 'NOT REQUESTED'}
+                </Tag>
+                {quantityNo > 1 && !ftpApproved ? (
+                  <Tag color="warning">Quantity {quantityNo} locked until FTP approval</Tag>
+                ) : null}
+              </Space>
+              <Button
+                size="small"
+                type="primary"
+                disabled={quantityNo !== 1 || ftpApproved || !firstQtyAllDone}
+                onClick={() => void handleRequestFtpApproval()}
+              >
+                Approve FTP
+              </Button>
+            </div>
+          )}
           <Tabs
             className="qms-inspector-tabs"
             activeKey={activeTab}
@@ -918,7 +1066,8 @@ const QMSInspector = () => {
                     quantityOptions={quantityOptions}
                     quantityNo={quantityNo}
                     onQuantityChange={setQuantityNo}
-                    planEditLocked={planLocked}
+                    quantityLocked={!ftpApproved}
+                    planEditLocked={bocEditLocked}
                   />
                 ),
               },

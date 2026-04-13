@@ -29,6 +29,8 @@ from .pdf_annotation import router as pdf_annotation_router
 
 from .quality import router as quality_router
 
+from .qms_operator import router as qms_operator_router
+
 
 
 __all__ = [
@@ -63,7 +65,9 @@ __all__ = [
 
     "pdf_annotation_router",
 
-    "quality_router"
+    "quality_router",
+
+    "qms_operator_router"
 
 ]
 

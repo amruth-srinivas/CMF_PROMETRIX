@@ -76,11 +76,40 @@ class StageInspectionUpdate(BaseModel):
     is_done: Optional[bool] = None
 
 
+class StageInspectionMeasurementSummary(BaseModel):
+    """True if any stage row for this part/order/op has a non-empty measurement field."""
+
+    any_recorded: bool
+
+
+class FTPStatusUpsert(BaseModel):
+    order_id: int
+    ipid: str = Field(..., description="FTP key for part/order/op scope")
+    status: str = Field(default="pending", description="pending | approved | rejected")
+    is_completed: Optional[bool] = None
+
+
+class FTPStatusResponse(BaseModel):
+    id: int
+    order_id: int
+    ipid: str
+    is_completed: bool
+    status: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class InspectionPlanStatusUpsert(BaseModel):
     part_number: str = Field(..., description="oms.parts.part_number")
     sales_order_id: int
     op_no: int
     status: str = Field(default="draft", description="draft | confirmed")
+    confirmed_by_username: Optional[str] = Field(
+        default=None,
+        description="Login name of user who confirmed the plan (set when status becomes confirmed)",
+    )
 
 
 class InspectionPlanStatusResponse(BaseModel):
@@ -89,6 +118,7 @@ class InspectionPlanStatusResponse(BaseModel):
     sales_order_id: int
     op_no: int
     status: str
+    confirmed_by_username: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

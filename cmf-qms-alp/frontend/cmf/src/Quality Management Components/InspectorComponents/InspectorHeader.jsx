@@ -1,6 +1,6 @@
 import React from 'react';
 import { Space, Button, Typography, Divider, Tag } from 'antd';
-import { ArrowLeftOutlined, ExportOutlined, SaveOutlined, SettingOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, ExportOutlined, SettingOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 
 const { Text } = Typography;
@@ -18,8 +18,12 @@ const InspectorHeader = ({
   mode = 'PLAN',
   onModeChange,
   planStatus = null,
+  /** Stored when the plan was confirmed (login username). */
+  confirmedByUsername = null,
   onConfirmPlan,
   confirmPlanDisabled = false,
+  measureOnly = false,
+  hideTopActions = false,
 }) => {
   const navigate = useNavigate();
 
@@ -90,31 +94,44 @@ const InspectorHeader = ({
       </Space>
 
       <Space size="middle">
-        <div style={{ background: '#f5f5f5', padding: '4px', borderRadius: '6px', display: 'flex', gap: '4px' }}>
-          <Button
-            size="small"
-            type={mode === 'PLAN' ? 'primary' : 'text'}
-            style={{ fontSize: '12px', minWidth: '70px', height: '28px' }}
-            onClick={() => onModeChange?.('PLAN')}
-          >
-            PLAN
-          </Button>
-          <Button
-            size="small"
-            type={mode === 'MEASURE' ? 'primary' : 'text'}
-            style={{ fontSize: '12px', minWidth: '70px', height: '28px' }}
-            onClick={() => onModeChange?.('MEASURE')}
-          >
-            MEASURE
-          </Button>
-        </div>
-
-        {planStatus === 'confirmed' && (
-          <Tag color="success" style={{ margin: 0 }}>
-            Plan confirmed
+        {measureOnly ? (
+          <Tag color="processing" style={{ margin: 0, fontWeight: 600 }}>
+            MEASURE MODE
           </Tag>
+        ) : (
+          <div style={{ background: '#f5f5f5', padding: '4px', borderRadius: '6px', display: 'flex', gap: '4px' }}>
+            <Button
+              size="small"
+              type={mode === 'PLAN' ? 'primary' : 'text'}
+              style={{ fontSize: '12px', minWidth: '70px', height: '28px' }}
+              onClick={() => onModeChange?.('PLAN')}
+            >
+              PLAN
+            </Button>
+            <Button
+              size="small"
+              type={mode === 'MEASURE' ? 'primary' : 'text'}
+              style={{ fontSize: '12px', minWidth: '70px', height: '28px' }}
+              onClick={() => onModeChange?.('MEASURE')}
+            >
+              MEASURE
+            </Button>
+          </div>
         )}
-        {planStatus !== 'confirmed' && typeof onConfirmPlan === 'function' && (
+
+        {!measureOnly && planStatus === 'confirmed' && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, maxWidth: 220 }}>
+            <Tag color="success" style={{ margin: 0 }}>
+              Plan confirmed
+            </Tag>
+            {confirmedByUsername ? (
+              <Text type="secondary" style={{ fontSize: '11px', lineHeight: 1.2 }} ellipsis={{ tooltip: confirmedByUsername }}>
+                by {confirmedByUsername}
+              </Text>
+            ) : null}
+          </div>
+        )}
+        {!measureOnly && planStatus !== 'confirmed' && typeof onConfirmPlan === 'function' && (
           <Button
             type="primary"
             icon={<CheckCircleOutlined />}
@@ -125,18 +142,13 @@ const InspectorHeader = ({
             Confirm plan
           </Button>
         )}
-        <Button
-          type="default"
-          style={{ height: '36px', display: 'flex', alignItems: 'center', gap: 8 }}
-        >
-          <SaveOutlined style={{ fontSize: 16 }} />
-          SAVE
-        </Button>
-        <Button style={{ height: '36px', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <ExportOutlined style={{ fontSize: 16, color: '#64748b' }} />
-          EXPORT
-        </Button>
-        <Button type="text" icon={<SettingOutlined style={{ fontSize: 18, color: '#64748b' }} />} />
+        {!hideTopActions && (
+          <Button style={{ height: '36px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ExportOutlined style={{ fontSize: 16, color: '#64748b' }} />
+            EXPORT
+          </Button>
+        )}
+        {!hideTopActions && <Button type="text" icon={<SettingOutlined style={{ fontSize: 18, color: '#64748b' }} />} />}
       </Space>
     </div>
   );

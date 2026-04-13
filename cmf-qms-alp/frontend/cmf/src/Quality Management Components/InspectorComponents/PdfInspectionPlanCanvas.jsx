@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Document, Page } from 'react-pdf';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { App, Button, Empty, Space, Spin, Typography } from 'antd';
 import axios from 'axios';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
@@ -31,6 +32,8 @@ const PdfInspectionPlanCanvas = ({
   balloonOverlays = [],
   noteOverlays = [],
   selectedBalloonId = null,
+  /** When false the source file is an image, not a PDF — use <img> instead of react-pdf. */
+  isPdf = true,
 }) => {
   const { message } = App.useApp();
   const canvasWrapRef = useRef(null);
@@ -111,63 +114,115 @@ const PdfInspectionPlanCanvas = ({
   }, []);
 
   /**
-   * Export current page as PNG including balloon overlays.
-   * Returned blob can be uploaded to operation-documents/upload as BALOON.
+   * Build a PDF with balloon rectangles and labels in PDF user space (same bbox as overlays).
+   * Upload as application/pdf to operation-documents (MinIO).
    */
-  const exportBalloonedPng = useCallback(async () => {
-    const wrap = canvasWrapRef.current;
-    if (!wrap) return null;
-    const srcCanvas = wrap.querySelector('canvas');
-    if (!srcCanvas) return null;
+  const exportBalloonedPdf = useCallback(async () => {
+    if (!fileUrl) return null;
+    let res;
+    try {
+      res = await fetch(fileUrl);
+    } catch (e) {
+      console.error(e);
+      return null;
+    }
+    if (!res.ok) return null;
+    const bytes = new Uint8Array(await res.arrayBuffer());
 
-    const out = document.createElement('canvas');
-    out.width = srcCanvas.width;
-    out.height = srcCanvas.height;
-    const ctx = out.getContext('2d');
-    if (!ctx) return null;
-    ctx.drawImage(srcCanvas, 0, 0);
+    let pdfDoc;
+    if (isPdf) {
+      pdfDoc = await PDFDocument.load(bytes);
+    } else {
+      pdfDoc = await PDFDocument.create();
+      let img;
+      const isPng = bytes[0] === 0x89 && bytes[1] === 0x50;
+      if (isPng) {
+        img = await pdfDoc.embedPng(bytes);
+      } else {
+        img = await pdfDoc.embedJpg(bytes);
+      }
+      const dims = img.scale(1);
+      const page = pdfDoc.addPage([dims.width, dims.height]);
+      page.drawImage(img, { x: 0, y: 0, width: dims.width, height: dims.height });
+    }
 
-    const displayW = parseFloat(srcCanvas.style.width) || srcCanvas.width / (window.devicePixelRatio || 1);
-    const scale = displayW > 0 ? srcCanvas.width / displayW : 1;
+    const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const fontSize = 9;
+    const green = rgb(34 / 255, 197 / 255, 94 / 255);
+    const pageCount = pdfDoc.getPageCount();
 
-    for (const br of balloonScreenRects) {
-      const x = Math.round(br.left * scale);
-      const y = Math.round(br.top * scale);
-      const w = Math.max(4, Math.round(br.width * scale));
-      const h = Math.max(4, Math.round(br.height * scale));
-      ctx.strokeStyle = '#22c55e';
-      ctx.lineWidth = Math.max(2, Math.round(2 * scale));
-      ctx.fillStyle = 'rgba(34, 197, 94, 0.1)';
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeRect(x, y, w, h);
+    const byPage = new Map();
+    for (const b of balloonOverlays) {
+      const p = Number(b.page) >= 1 ? Number(b.page) : 1;
+      if (!byPage.has(p)) byPage.set(p, []);
+      byPage.get(p).push(b);
+    }
 
-      const label = String(br.label || '');
-      if (label) {
-        const tagH = Math.max(16, Math.round(18 * scale));
-        const fontPx = Math.max(10, Math.round(11 * scale));
-        ctx.font = `700 ${fontPx}px Arial, sans-serif`;
-        const textW = Math.ceil(ctx.measureText(label).width);
-        const tagW = Math.max(Math.round(20 * scale), textW + Math.round(10 * scale));
-        const tagX = Math.max(0, x - Math.round(2 * scale));
-        const tagY = Math.max(0, y - tagH);
-        ctx.fillStyle = '#22c55e';
-        ctx.fillRect(tagX, tagY, tagW, tagH);
-        ctx.fillStyle = '#ffffff';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(label, tagX + Math.round((tagW - textW) / 2), tagY + Math.round(tagH / 2));
+    for (let p = 1; p <= pageCount; p += 1) {
+      const page = pdfDoc.getPage(p - 1);
+      const pageH = page.getHeight();
+      const pageW = page.getWidth();
+      const pageOverlays = byPage.get(p) || [];
+      for (const b of pageOverlays) {
+        const { pdfRect, label } = b;
+        const { x, y, width, height } = pdfRect;
+        if (!Number.isFinite(x) || !Number.isFinite(y) || width <= 0 || height <= 0) continue;
+        const yPdf = pageH - y - height;
+        const drawX = Math.max(0, Math.min(x, pageW - 0.5));
+        const drawY = Math.max(0, Math.min(yPdf, pageH - 0.5));
+        const drawW = Math.min(width, pageW - drawX);
+        const drawH = Math.min(height, pageH - drawY);
+
+        page.drawRectangle({
+          x: drawX,
+          y: drawY,
+          width: drawW,
+          height: drawH,
+          borderColor: green,
+          borderWidth: 1,
+          borderOpacity: 1,
+          color: green,
+          opacity: 0.12,
+        });
+
+        const txt = String(label || '').trim();
+        if (txt) {
+          const textW = font.widthOfTextAtSize(txt, fontSize);
+          const tagH = 14;
+          const padX = 6;
+          const tagW = Math.min(Math.max(20, textW + padX * 2), pageW);
+          const tagTopTl = Math.max(0, y - tagH - 2);
+          const tagYbl = pageH - tagTopTl - tagH;
+          const tagX = Math.max(0, x - 2);
+          const availTagW = pageW - tagX;
+          const tw = Math.min(tagW, availTagW);
+          page.drawRectangle({
+            x: tagX,
+            y: tagYbl,
+            width: tw,
+            height: tagH,
+            color: green,
+          });
+          page.drawText(txt, {
+            x: tagX + (tw - textW) / 2,
+            y: tagYbl + 3,
+            size: fontSize,
+            font,
+            color: rgb(1, 1, 1),
+          });
+        }
       }
     }
 
-    return await new Promise((resolve) => {
-      out.toBlob((b) => resolve(b || null), 'image/png');
-    });
-  }, [balloonScreenRects]);
+    const outBytes = await pdfDoc.save();
+    return new Blob([outBytes], { type: 'application/pdf' });
+  }, [fileUrl, balloonOverlays, isPdf]);
 
   useEffect(() => {
     if (typeof onExportBalloonedReady !== 'function') return;
-    onExportBalloonedReady(exportBalloonedPng);
+    onExportBalloonedReady(exportBalloonedPdf);
     return () => onExportBalloonedReady(null);
-  }, [onExportBalloonedReady, exportBalloonedPng]);
+  }, [onExportBalloonedReady, exportBalloonedPdf]);
 
   useLayoutEffect(() => {
     let cancelled = false;
@@ -558,6 +613,7 @@ const PdfInspectionPlanCanvas = ({
             minHeight: scrollContentSize.mh > 0 ? scrollContentSize.mh : '100%',
           }}
         >
+          {isPdf ? (
           <Document
             file={fileUrl}
             onLoadSuccess={(pdf) => {
@@ -669,6 +725,91 @@ const PdfInspectionPlanCanvas = ({
                 ))}
             </div>
           </Document>
+          ) : (
+            <div
+              ref={canvasWrapRef}
+              style={{
+                position: 'relative',
+                display: 'inline-block',
+                lineHeight: 0,
+                verticalAlign: 'top',
+                flexShrink: 0,
+                cursor: cursorStyle,
+                touchAction: 'none',
+                boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+              }}
+              onMouseDown={onCanvasMouseDown}
+              onMouseMove={onCanvasMouseMove}
+              onMouseUp={onCanvasMouseUp}
+              onMouseLeave={onCanvasMouseLeave}
+            >
+              <img
+                src={fileUrl}
+                alt="Drawing"
+                style={{ width: pageWidth, display: 'block' }}
+                onLoad={(e) => {
+                  const nw = e.currentTarget.naturalWidth;
+                  const nh = e.currentTarget.naturalHeight;
+                  if (nw > 0 && nh > 0) setPdfDimensions({ width: nw, height: nh });
+                }}
+                draggable={false}
+              />
+              {overlayRect && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: overlayRect.left,
+                    top: overlayRect.top,
+                    width: overlayRect.width,
+                    height: overlayRect.height,
+                    boxSizing: 'border-box',
+                    pointerEvents: 'none',
+                    borderRadius: 2,
+                    ...overlayStyle,
+                  }}
+                />
+              )}
+              {balloonScreenRects.map((br) => (
+                <div
+                  key={br.id}
+                  style={{
+                    position: 'absolute',
+                    left: br.left,
+                    top: br.top,
+                    width: br.width,
+                    height: br.height,
+                    border: br.selected ? '3px solid #f59e0b' : '2px solid #22c55e',
+                    boxSizing: 'border-box',
+                    background: br.selected ? 'rgba(245, 158, 11, 0.12)' : 'rgba(34, 197, 94, 0.1)',
+                    pointerEvents: 'none',
+                    borderRadius: 3,
+                    zIndex: 5,
+                  }}
+                >
+                  <span
+                    style={{
+                      position: 'absolute',
+                      left: -2,
+                      top: -18,
+                      minWidth: 20,
+                      height: 18,
+                      padding: '0 6px',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      lineHeight: '18px',
+                      textAlign: 'center',
+                      color: '#fff',
+                      background: br.selected ? '#f59e0b' : '#22c55e',
+                      borderRadius: 4,
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+                    }}
+                  >
+                    {br.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

@@ -136,6 +136,8 @@ const InspectorSidebar = ({
   autoBalloonDisabled = false,
   /** When plan is confirmed, block editing tools that change characteristics */
   planEditLocked = false,
+  /** Operator measure mode: show pan/view/clear only; hide select, stamp, notes, auto balloon */
+  operatorRestricted = false,
 }) => {
   const set = (t) => () => {
     if (planEditLocked && (t === 'select' || t === 'stamp')) return;
@@ -159,33 +161,39 @@ const InspectorSidebar = ({
     >
       <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         <SectionHeader title="TOOLS" />
-        <SidebarItemRaster
-          staticSrc={iconSelectJpg}
-          animatedSrc={iconSelectGif}
-          label="Select"
-          active={activeTool === 'select'}
-          disabled={planEditLocked}
-          onClick={set('select')}
-        />
-        <SidebarItemRaster staticSrc={iconDropPng} label="Pan" active={activeTool === 'pan'} onClick={set('pan')} />
-        <SidebarItemRaster
-          staticSrc={iconSealJpg}
-          animatedSrc={iconSealGif}
-          label="Stamp"
-          active={activeTool === 'stamp'}
-          disabled={planEditLocked}
-          onClick={set('stamp')}
-        />
-        <SidebarItemRaster
-          staticSrc={iconNotesJpg}
-          animatedSrc={iconNotesGif}
-          label="Notes"
-          active={activeTool === 'notes'}
-          onClick={set('notes')}
-        />
+        {!operatorRestricted && (
+          <>
+            <SidebarItemRaster
+              staticSrc={iconSelectJpg}
+              animatedSrc={iconSelectGif}
+              label="Select"
+              active={activeTool === 'select'}
+              disabled={planEditLocked}
+              onClick={set('select')}
+            />
+            <SidebarItemRaster staticSrc={iconDropPng} label="Pan" active={activeTool === 'pan'} onClick={set('pan')} />
+            <SidebarItemRaster
+              staticSrc={iconSealJpg}
+              animatedSrc={iconSealGif}
+              label="Stamp"
+              active={activeTool === 'stamp'}
+              disabled={planEditLocked}
+              onClick={set('stamp')}
+            />
+            <SidebarItemRaster
+              staticSrc={iconNotesJpg}
+              animatedSrc={iconNotesGif}
+              label="Notes"
+              active={activeTool === 'notes'}
+              onClick={set('notes')}
+            />
+          </>
+        )}
+        {operatorRestricted && (
+          <SidebarItemRaster staticSrc={iconDropPng} label="Pan" active={activeTool === 'pan'} onClick={set('pan')} />
+        )}
 
         <SidebarDivider />
-
         <SectionHeader title="VIEW" />
         <SidebarItemRaster staticSrc={iconZoomInJpg} animatedSrc={iconZoomInGif} label="Zoom In" onClick={onZoomIn} />
         <SidebarItemRaster staticSrc={iconZoomOutJpg} animatedSrc={iconZoomOutGif} label="Zoom Out" onClick={onZoomOut} />
@@ -195,13 +203,15 @@ const InspectorSidebar = ({
         <SidebarDivider />
 
         <SectionHeader title="ACTIONS" />
-        <SidebarItemRaster
-          staticSrc={iconBrainPng}
-          animatedSrc={iconBrainGif}
-          label="Auto Balloon"
-          disabled={autoBalloonDisabled || planEditLocked}
-          onClick={autoBalloonDisabled || planEditLocked ? undefined : onAutoBalloon}
-        />
+        {!operatorRestricted && (
+          <SidebarItemRaster
+            staticSrc={iconBrainPng}
+            animatedSrc={iconBrainGif}
+            label="Auto Balloon"
+            disabled={autoBalloonDisabled || planEditLocked}
+            onClick={autoBalloonDisabled || planEditLocked ? undefined : onAutoBalloon}
+          />
+        )}
         <SidebarItemRaster
           staticSrc={iconBinJpg}
           animatedSrc={iconBinGif}

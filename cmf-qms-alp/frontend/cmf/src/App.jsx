@@ -134,6 +134,7 @@ function App() {
           <Route path="/operator/inspection-results" element={<OperatorDashboard />} />
           <Route path="/operator/inventory-data" element={<OperatorDashboard />} />
           <Route path="/operator/documents" element={<OperatorDashboard />} />
+          <Route path="/operator/qms-inspector" element={<QMSInspector />} />
           </Route>
 
         </Routes>

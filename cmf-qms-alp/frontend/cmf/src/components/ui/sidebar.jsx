@@ -277,11 +277,6 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <FileTextOutlined />,
       },
       {
-        key: `${prefix}/quality-management`,
-        label: <Link to={`${prefix}/quality-management`} onClick={() => setMobileDrawerOpen(false)}>Quality Management</Link>,
-        icon: <SafetyCertificateOutlined />,
-      },
-      {
         key: `${prefix}/create-inspection-plan`,
         label: <Link to={`${prefix}/create-inspection-plan`} onClick={() => setMobileDrawerOpen(false)}>Create Inspection Plan</Link>,
         icon: <BuildOutlined />,

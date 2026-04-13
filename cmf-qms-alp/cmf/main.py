@@ -46,6 +46,8 @@ from routers import (
 
     quality_router,
 
+    qms_operator_router,
+
 )
 
 
@@ -198,6 +200,8 @@ app.include_router(scheduling_router, prefix="/api/v1")
 app.include_router(pdf_annotation_router, prefix="/api/v1")
 
 app.include_router(quality_router, prefix="/api/v1")
+
+app.include_router(qms_operator_router, prefix="/api/v1")
 
 
 @app.get("/")

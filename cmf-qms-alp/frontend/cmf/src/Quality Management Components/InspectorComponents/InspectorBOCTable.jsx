@@ -103,6 +103,7 @@ const InspectorBOCTable = ({
   quantityOptions = [{ value: 1, label: 'Quantity 1' }],
   quantityNo = 1,
   onQuantityChange,
+  quantityLocked = false,
   /** Hide plan editing actions (e.g. after plan is confirmed) */
   planEditLocked = false,
 }) => {
@@ -310,8 +311,22 @@ const InspectorBOCTable = ({
             disabled={locked}
             onBlur={(e) => {
               if (locked) return;
-              onMeasurePatch?.(record.stageInspectionId, { [apiKey]: e.target.value });
-              void maybePatchMean(record);
+              const { m1, m2, m3 } = readMeasureInputs(record.id);
+              const meanStr = computeMeanFromStrings(m1, m2, m3);
+              const a = parseMeasurementNum(m1);
+              const b = parseMeasurementNum(m2);
+              const c = parseMeasurementNum(m3);
+              const payload = {
+                measured_1: m1,
+                measured_2: m2,
+                measured_3: m3,
+              };
+              if (meanStr != null) payload.measured_mean = meanStr;
+              payload.is_done = a != null && b != null && c != null;
+              onMeasurePatch?.(record.stageInspectionId, payload);
+              if (payload.is_done) {
+                void maybePatchMean(record);
+              }
             }}
             onKeyDown={(e) => handleMeasureKeyDown(e, record, rowIndex, field)}
             style={{ width, fontSize: 11, paddingInline: 6 }}
@@ -555,7 +570,10 @@ const InspectorBOCTable = ({
                 size="small"
                 style={{ minWidth: 120 }}
                 value={quantityNo}
-                options={quantityOptions}
+                options={(quantityOptions || []).map((q) => ({
+                  ...q,
+                  disabled: quantityLocked && Number(q?.value) > 1,
+                }))}
                 onChange={onQuantityChange}
                 showSearch={false}
               />
